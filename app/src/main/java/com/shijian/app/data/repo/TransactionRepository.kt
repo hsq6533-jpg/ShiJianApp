@@ -26,6 +26,9 @@ class TransactionRepository(private val dao: TransactionDao) {
 
     suspend fun update(t: TransactionEntity) = dao.update(t)
 
+    /** 标记报销状态（报销或撤销报销） */
+    suspend fun setReimbursed(id: Long, reimbursed: Boolean) = dao.setReimbursed(id, reimbursed)
+
     suspend fun delete(t: TransactionEntity) = dao.delete(t)
 
     suspend fun clearAll() = dao.clearAll()

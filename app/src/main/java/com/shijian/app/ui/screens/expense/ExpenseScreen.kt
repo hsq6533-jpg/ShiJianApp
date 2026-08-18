@@ -2,6 +2,7 @@
 
 package com.shijian.app.ui.screens.expense
 
+import android.widget.Toast
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -22,11 +23,14 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -37,6 +41,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -68,11 +73,13 @@ fun ExpenseScreen(
     nav: (String) -> Unit,
     initialFilter: String = ""
 ) {
+    val context = LocalContext.current
     val today = remember { LocalDate.now() }
     var year by rememberSaveable { mutableIntStateOf(today.year) }
     var month by rememberSaveable { mutableIntStateOf(today.monthValue) }
     var filter by rememberSaveable { mutableStateOf(initialFilter.ifEmpty { "全部" }) }
     var deleteTarget by remember { mutableStateOf<TransactionEntity?>(null) }
+    var showMonthPicker by rememberSaveable { mutableStateOf(false) }
 
     val monthList by remember(year, month) {
         container.transactionRepo.month(year, month)
@@ -126,7 +133,10 @@ fun ExpenseScreen(
                 Text(
                     text = DateUtils.monthCn(year, month),
                     style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { showMonthPicker = true }
+                        .padding(vertical = 8.dp),
                     textAlign = TextAlign.Center
                 )
                 Text(
@@ -156,7 +166,7 @@ fun ExpenseScreen(
             ) {
                 StatCell(Modifier.weight(1f), "本月收入", income, incomeCount, Success500)
                 StatCell(Modifier.weight(1f), "本月支出", expense, expenseCount, Danger500)
-                StatCell(Modifier.weight(1f), "待报销未报销", pendingSum, pending.size, Orange500)
+                StatCell(Modifier.weight(1f), "待报销", pendingSum, pending.size, Orange500)
             }
 
             Spacer(Modifier.height(12.dp))
@@ -191,7 +201,14 @@ fun ExpenseScreen(
                     onItemClick = { t ->
                         nav(Routes.ADD_RECORD.replace("{editId}", t.id.toString()).replace("{type}", "").replace("{date}", ""))
                     },
-                    onItemLongClick = { deleteTarget = it }
+                    onItemLongClick = { deleteTarget = it },
+                    onReimburse = { t ->
+                        scope.launch {
+                            runCatching { container.transactionRepo.setReimbursed(t.id, true) }
+                                .onSuccess { Toast.makeText(context, "已标记为报销完成", Toast.LENGTH_SHORT).show() }
+                                .onFailure { Toast.makeText(context, "报销失败，请重试", Toast.LENGTH_SHORT).show() }
+                        }
+                    }
                 )
                 Spacer(Modifier.height(16.dp))
                 FooterText()
@@ -214,6 +231,35 @@ fun ExpenseScreen(
                 TextButton(onClick = { deleteTarget = null }) { Text("取消") }
             }
         )
+    }
+
+    // ---- 月份选择器：点击月份文字弹出，可快速跳转任意年月 ----
+    if (showMonthPicker) {
+        val monthStartMillis = java.time.LocalDate.of(year, month, 1)
+            .atStartOfDay(java.time.ZoneOffset.UTC)
+            .toInstant()
+            .toEpochMilli()
+        val dateState = rememberDatePickerState(initialSelectedDateMillis = monthStartMillis)
+        DatePickerDialog(
+            onDismissRequest = { showMonthPicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    dateState.selectedDateMillis?.let { millis ->
+                        val d = java.time.Instant.ofEpochMilli(millis)
+                            .atZone(java.time.ZoneOffset.UTC)
+                            .toLocalDate()
+                        year = d.year
+                        month = d.monthValue
+                    }
+                    showMonthPicker = false
+                }) { Text("确定") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showMonthPicker = false }) { Text("取消") }
+            }
+        ) {
+            DatePicker(state = dateState, showModeToggle = false, title = { Text("选择月份", style = MaterialTheme.typography.labelLarge) })
+        }
     }
 }
 
@@ -286,7 +332,8 @@ private fun FooterText() {
 fun TransactionGroupedList(
     list: List<TransactionEntity>,
     onItemClick: (TransactionEntity) -> Unit,
-    onItemLongClick: (TransactionEntity) -> Unit
+    onItemLongClick: (TransactionEntity) -> Unit,
+    onReimburse: (TransactionEntity) -> Unit = {}
 ) {
     val grouped = remember(list) {
         list.groupBy { it.date }.toSortedMap(Comparator.reverseOrder())
@@ -303,7 +350,7 @@ fun TransactionGroupedList(
             )
             SjCard(modifier = Modifier.fillMaxWidth()) {
                 items.forEachIndexed { i, t ->
-                    TransactionRow(t, onClick = { onItemClick(t) }, onLongClick = { onItemLongClick(t) })
+                    TransactionRow(t, onClick = { onItemClick(t) }, onLongClick = { onItemLongClick(t) }, onReimburse = { onReimburse(t) })
                     if (i < items.lastIndex) {
                         Box(
                             modifier = Modifier
@@ -322,7 +369,8 @@ fun TransactionGroupedList(
 fun TransactionRow(
     t: TransactionEntity,
     onClick: () -> Unit,
-    onLongClick: () -> Unit
+    onLongClick: () -> Unit,
+    onReimburse: (() -> Unit)? = null
 ) {
     Row(
         modifier = Modifier
@@ -350,14 +398,17 @@ fun TransactionRow(
                 if (t.isMilkTea) {
                     Text(text = " ☕", fontSize = 12.sp)
                 }
-                if (t.isReimbursable && !t.isReimbursed) {
+                if (t.isReimbursable) {
                     Spacer(Modifier.width(6.dp))
                     Text(
-                        text = "待报销",
+                        text = if (t.isReimbursed) "已报销" else "待报销",
                         style = MaterialTheme.typography.labelSmall,
                         color = androidx.compose.ui.graphics.Color.White,
                         modifier = Modifier
-                            .background(Orange500, RoundedCornerShape(4.dp))
+                            .background(
+                                if (t.isReimbursed) TextSecondary else Orange500,
+                                RoundedCornerShape(4.dp)
+                            )
                             .padding(horizontal = 5.dp, vertical = 1.dp)
                     )
                 }
@@ -372,12 +423,31 @@ fun TransactionRow(
                 )
             }
         }
-        Text(
-            text = FormatUtils.signedAmount(t.amount, t.type == "INCOME"),
-            color = if (t.type == "INCOME") Success500 else Danger500,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.SemiBold,
-            style = MaterialTheme.typography.bodyLarge.copy(fontFeatureSettings = "tnum")
-        )
+        Column(horizontalAlignment = Alignment.End) {
+            Text(
+                text = FormatUtils.signedAmount(t.amount, t.type == "INCOME"),
+                color = if (t.type == "INCOME") Success500 else Danger500,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.bodyLarge.copy(fontFeatureSettings = "tnum")
+            )
+            // 待报销记录：提供「报销」按钮，一键标记为已报销
+            if (t.isReimbursable && !t.isReimbursed && onReimburse != null) {
+                Spacer(Modifier.height(3.dp))
+                Box(
+                    modifier = Modifier
+                        .background(Orange500.copy(alpha = 0.14f), RoundedCornerShape(6.dp))
+                        .clickable(onClick = onReimburse)
+                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                ) {
+                    Text(
+                        text = "报销",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Orange500,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+        }
     }
 }

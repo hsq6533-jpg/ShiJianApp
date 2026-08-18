@@ -340,6 +340,7 @@ fun AddRecordScreen(
                         saving = true
                         scope.launch {
                             val type = if (typeChip == "收入") "INCOME" else "EXPENSE"
+                            val reimbursable = typeChip == "待报销" || reimbursable
                             val entity = TransactionEntity(
                                 id = editId ?: editing?.id ?: 0,
                                 type = type,
@@ -349,8 +350,9 @@ fun AddRecordScreen(
                                 merchant = merchant.trim(),
                                 date = DateUtils.ymd(date),
                                 time = String.format("%02d:%02d", time.hour, time.minute),
-                                isReimbursable = typeChip == "待报销" || reimbursable,
-                                isReimbursed = false,
+                                isReimbursable = reimbursable,
+                                // 编辑已报销记录时保留报销状态；不再是待报销则重置
+                                isReimbursed = if (reimbursable) editing?.isReimbursed == true else false,
                                 isMilkTea = selectedCategory == "奶茶"
                             )
                             if (entity.id == 0L) container.transactionRepo.insert(entity)

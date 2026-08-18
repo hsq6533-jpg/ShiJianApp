@@ -89,8 +89,19 @@ import com.shijian.app.util.FormatUtils
 import com.shijian.app.util.LocationUtils
 import kotlinx.coroutines.launch
 
-private val MODES = listOf("附近", "按关键词", "按地址")
 private val SORT_OPTIONS = listOf("综合", "距离最近", "评分最高")
+
+/** 地址特征词：命中则按地址解析周边搜索，否则按关键词搜索 */
+private val ADDRESS_KEYWORDS = listOf(
+    "路", "街", "道", "巷", "村", "镇", "区", "号",
+    "大厦", "广场", "中心", "小区", "公寓", "酒店", "公园", "桥", "门", "大道"
+)
+
+private fun isAddressQuery(q: String): Boolean {
+    val s = q.trim()
+    if (s.length < 3) return false
+    return ADDRESS_KEYWORDS.any { s.contains(it) }
+}
 
 /** 搜索中心：定位坐标或地址 */
 private data class SearchCenter(
@@ -135,9 +146,7 @@ fun FoodScreen(
     var showKeySheet by remember { mutableStateOf(false) }
     var keyInput by rememberSaveable { mutableStateOf("") }
 
-    var mode by rememberSaveable { mutableStateOf("附近") }
     var kw by rememberSaveable { mutableStateOf("") }
-    var city by rememberSaveable { mutableStateOf("") }
     var category by rememberSaveable { mutableStateOf("全部") }
     var sort by rememberSaveable { mutableStateOf("综合") }
     var hasSearched by rememberSaveable { mutableStateOf(false) }
@@ -150,31 +159,70 @@ fun FoodScreen(
     var picking by remember { mutableStateOf(false) }
     var blacklistTarget by remember { mutableStateOf<FoodPoiEntity?>(null) }
 
-    // 首次进入：默认地址作为搜索中心
+    // 首次进入：自动定位为搜索中心（定位不可用则用默认地址），定位完成后自动随机推荐
+    var locatedOnce by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(Unit) {
-        runCatching {
-            val def = container.addressRepo.getDefault()
-            if (def != null) {
-                center = def.toCenter()
-            }
+        if (locatedOnce) return@LaunchedEffect
+        locatedOnce = true
+        var c: SearchCenter? = null
+        val granted = ContextCompat.checkSelfPermission(
+            context, Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        if (granted) {
+            pickingLocation = true
+            val loc = LocationUtils.getCurrentLocation(context)
+            pickingLocation = false
+            if (loc != null) c = SearchCenter("我的定位", loc.latitude, loc.longitude)
         }
+        if (c == null) {
+            val def = runCatching { container.addressRepo.getDefault() }.getOrNull()
+            if (def != null) c = def.toCenter()
+        }
+        center = c
+        runCatching { pick() }
     }
 
-    // 随机推荐：进入页面自动挑一个（任何异常都不崩）
+    // 随机推荐：先确保有定位中心 → 周边搜索 → 排除奶茶甜品 → 随机挑一个
     val pick: () -> Unit = {
         picking = true
         scope.launch {
             runCatching {
-                picked = container.foodRepo.randomPick()
+                val key = container.securePrefs.getAmapKey()
+                var c = center
+                if (c == null || c.lat == null || c.lng == null) {
+                    val loc = LocationUtils.getCurrentLocation(context)
+                    if (loc != null) {
+                        c = SearchCenter("我的定位", loc.latitude, loc.longitude)
+                        center = c
+                    }
+                }
+                if (c?.lat != null && c.lng != null && !key.isNullOrBlank()) {
+                    // 周边搜索（半径用设置里的预设距离）
+                    container.foodRepo.searchAround(
+                        key, c.lat!!, c.lng!!,
+                        settings.searchRadiusKm, null, null, settings.multiPointSearch
+                    )
+                    val all = container.foodRepo.results.value.filter { !it.isBlacklisted }
+                    // 优先非奶茶/甜品/咖啡/饮品类
+                    val preferred = all.filter { poi ->
+                        val t = poi.type + poi.name
+                        !(t.contains("奶茶") || t.contains("甜品") || t.contains("咖啡") ||
+                            t.contains("饮品") || t.contains("蛋糕") || t.contains("面包") ||
+                            t.contains("冰淇淋") || t.contains("茶艺") || t.contains("果饮"))
+                    }
+                    picked = (preferred.ifEmpty { all }).randomOrNull()
+                } else {
+                    // 无中心或未配置 Key：从本地缓存随机
+                    picked = container.foodRepo.randomPick()
+                }
             }
             picking = false
         }
     }
-    LaunchedEffect(Unit) { runCatching { pick() } }
 
     val toast: (String) -> Unit = { msg -> Toast.makeText(context, msg, Toast.LENGTH_SHORT).show() }
 
-    // 定位权限申请
+    // 定位权限申请（用户手动触发时）
     var useGps: () -> Unit = {}
     val locationPermLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -206,6 +254,7 @@ fun FoodScreen(
         }
     }
 
+    // 统一搜索：智能识别「地址」或「关键词」，都在预设距离内搜索
     val doSearch: () -> Unit = doSearch@ {
         val key = container.securePrefs.getAmapKey()
         if (key.isNullOrBlank()) {
@@ -216,30 +265,21 @@ fun FoodScreen(
         hasSearched = true
         scope.launch {
             runCatching {
-                when (mode) {
-                    "附近" -> {
-                        val c = center
-                        if (c == null) { toast("请先选择搜索中心"); return@launch }
-                        if (c.lat != null && c.lng != null) {
-                            container.foodRepo.searchAround(
-                                key, c.lat, c.lng,
-                                settings.searchRadiusKm,
-                                kw.ifBlank { null },
-                                category.takeUnless { it == "全部" },
-                                settings.multiPointSearch
-                            )
-                        } else {
-                            container.foodRepo.searchByAddress(
-                                key, c.address.orEmpty(), city.ifBlank { null },
-                                settings.searchRadiusKm, settings.multiPointSearch
-                            )
-                        }
-                    }
-                    "按关键词" -> container.foodRepo.searchByKeyword(key, kw, city.ifBlank { null })
-                    else -> container.foodRepo.searchByAddress(
-                        key, kw, city.ifBlank { null },
+                val q = kw.trim()
+                val c = center
+                when {
+                    // 1. 地址 → 解析坐标后搜周边
+                    isAddressQuery(q) -> container.foodRepo.searchByAddress(
+                        key, q, null,
                         settings.searchRadiusKm, settings.multiPointSearch
                     )
+                    // 2. 有关键词或空关键词 + 有定位中心 → 周边搜索
+                    c?.lat != null && c.lng != null -> container.foodRepo.searchAround(
+                        key, c.lat!!, c.lng!!,
+                        settings.searchRadiusKm, q.ifBlank { null }, null, settings.multiPointSearch
+                    )
+                    // 3. 兜底：无中心 → 全国关键词搜索
+                    else -> container.foodRepo.searchByKeyword(key, q, null)
                 }
             }.onFailure { toast("搜索失败，请检查 Key 或网络") }
         }
@@ -288,101 +328,28 @@ fun FoodScreen(
 
             Spacer(Modifier.height(14.dp))
 
-            // ---- 搜索栏 ----
-            OutlinedTextField(
-                value = kw,
-                onValueChange = { kw = it },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-                placeholder = {
-                    Text(
-                        when (mode) {
-                            "附近" -> "可选，输入美食关键词（如火锅）"
-                            "按地址" -> "输入地址，如中关村大街"
-                            else -> "搜美食，如火锅"
-                        },
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                },
-                leadingIcon = {
-                    Icon(Icons.Filled.Search, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(18.dp))
-                },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text)
-            )
-
-            Spacer(Modifier.height(10.dp))
-
-            // ---- 搜索模式 ----
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                MODES.forEach { m ->
-                    val sel = m == mode
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .background(
-                                if (sel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
-                                RoundedCornerShape(999.dp)
-                            )
-                            .clickable {
-                                mode = m
-                                if (m == "附近") { /* 保持关键词作为过滤 */ }
-                            }
-                            .padding(vertical = 8.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = m,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = if (sel) Color.White else MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(10.dp))
-
-            // ---- 搜索中心 + 城市 + 搜索按钮 ----
-            if (mode == "附近") {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(Brand500.copy(alpha = 0.10f), RoundedCornerShape(999.dp))
-                        .clickable { showCenterPicker = true }
-                        .padding(horizontal = 14.dp, vertical = 9.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Icons.Filled.LocationOn, contentDescription = null, tint = Brand500, modifier = Modifier.size(15.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        text = center?.label ?: "选择搜索中心",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = if (center == null) TextSecondary else Brand500,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Text(text = "›", color = TextSecondary, fontSize = 18.sp)
-                }
-            }
-
-            Spacer(Modifier.height(10.dp))
-
+            // ---- 统一搜索框（智能识别地址/关键词） ----
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 OutlinedTextField(
-                    value = city,
-                    onValueChange = { city = it },
+                    value = kw,
+                    onValueChange = { kw = it },
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(12.dp),
-                    placeholder = { Text(if (mode == "按地址") "城市（选填）" else "城市（选填，如 北京）", style = MaterialTheme.typography.bodyMedium) },
+                    placeholder = {
+                        Text(
+                            "搜附近美食，或输入地址/关键词",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(Icons.Filled.Search, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(18.dp))
+                    },
                     singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
                     colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Brand500)
                 )
                 Box(
@@ -390,19 +357,53 @@ fun FoodScreen(
                         .height(40.dp)
                         .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(999.dp))
                         .clickable(onClick = doSearch)
-                        .padding(horizontal = 16.dp),
+                        .padding(horizontal = 18.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = if (mode == "附近") "搜附近" else "搜索",
+                        text = if (searching) "搜索中…" else "搜索",
                         color = Color.White,
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.SemiBold
                     )
                 }
             }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "输入地址搜周边美食；输入奶茶、汉堡等关键词搜附近相关店铺；留空搜全部",
+                style = MaterialTheme.typography.labelSmall,
+                color = TextSecondary,
+                maxLines = 2
+            )
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(10.dp))
+
+            // ---- 搜索中心 ----
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Brand500.copy(alpha = 0.10f), RoundedCornerShape(999.dp))
+                    .clickable { showCenterPicker = true }
+                    .padding(horizontal = 14.dp, vertical = 9.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Filled.LocationOn, contentDescription = null, tint = Brand500, modifier = Modifier.size(15.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = when {
+                        pickingLocation -> "正在定位…"
+                        center == null -> "选择搜索中心（当前定位或常用地址）"
+                        center?.label == "我的定位" -> "当前定位 · 半径 ${settings.searchRadiusKm}km"
+                        else -> "中心：${center?.label} · 半径 ${settings.searchRadiusKm}km"
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (center == null) TextSecondary else Brand500,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(text = "›", color = TextSecondary, fontSize = 18.sp)
+            }
 
             // ---- 分类 chips ----
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -454,14 +455,18 @@ fun FoodScreen(
             Spacer(Modifier.height(14.dp))
 
             // ---- 结果区 ----
-            Text(text = "附近美食", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text(
+                text = if (kw.isNotBlank()) "「${kw.trim()}」搜索结果" else "附近美食",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
             Spacer(Modifier.height(4.dp))
             Text(
                 text = when {
                     searching -> "正在搜索美食…"
                     error != null -> error!!
                     displayed.isNotEmpty() -> "共 ${displayed.size} 家店铺 · 来自高德 · 缓存 30 天"
-                    !hasSearched -> if (amapKey.isNullOrBlank()) "配置高德 Key 后即可搜索附近美食" else "点击「搜附近」开始搜索"
+                    !hasSearched -> if (amapKey.isNullOrBlank()) "配置高德 Key 后即可搜索附近美食" else "进入页面已按当前定位搜索，也可以输入地址或关键词再搜"
                     else -> "没有找到相关店铺，换个关键词或范围试试"
                 },
                 style = MaterialTheme.typography.bodySmall,

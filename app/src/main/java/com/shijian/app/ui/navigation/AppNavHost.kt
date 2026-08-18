@@ -1,5 +1,10 @@
 package com.shijian.app.ui.navigation
 
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -75,7 +80,16 @@ fun AppNavHost(
         NavHost(
             navController = navController,
             startDestination = startTab,
-            modifier = Modifier.padding(padding)
+            modifier = Modifier.padding(padding),
+            // 平滑过渡动画，避免 Tab 切换生硬卡顿
+            enterTransition = {
+                fadeIn(tween(180)) + scaleIn(initialScale = 0.97f, animationSpec = tween(180))
+            },
+            exitTransition = {
+                fadeOut(tween(120)) + scaleOut(targetScale = 0.97f, animationSpec = tween(120))
+            },
+            popEnterTransition = { fadeIn(tween(200)) },
+            popExitTransition = { fadeOut(tween(200)) }
         ) {
             composable(Routes.HOME) {
                 HomeScreen(container = container, nav = navigate)

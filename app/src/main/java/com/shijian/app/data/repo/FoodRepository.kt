@@ -61,7 +61,8 @@ class FoodRepository(private val dao: FoodPoiDao) {
         _searching.value = true
         _error.value = null
         try {
-            val centerKey = "${lng},${lat}|${radiusKm}"
+            // 缓存 key 必须包含关键词/分类，否则不同搜索会互相串缓存
+            val centerKey = "${lng},${lat}|${radiusKm}|${keywords ?: ""}|${foodType ?: ""}"
             val freshBefore = System.currentTimeMillis() - CACHE_TTL
             val cachedCount = runCatching { dao.cachedCount(centerKey, freshBefore) }.getOrDefault(0)
             if (cachedCount > 0) {

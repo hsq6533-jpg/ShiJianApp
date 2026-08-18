@@ -21,6 +21,10 @@ interface TransactionDao {
     @Update
     suspend fun update(t: TransactionEntity)
 
+    /** 标记报销状态：报销 / 撤销报销 */
+    @Query("UPDATE transactions SET isReimbursed = :reimbursed WHERE id = :id")
+    suspend fun setReimbursed(id: Long, reimbursed: Boolean)
+
     @Delete
     suspend fun delete(t: TransactionEntity)
 

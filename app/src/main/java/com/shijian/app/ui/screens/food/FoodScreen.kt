@@ -183,7 +183,7 @@ fun FoodScreen(
         }
     }
 
-    val doSearch: () -> Unit = {
+    val doSearch: () -> Unit = doSearch@ {
         val key = container.securePrefs.getAmapKey()
         if (key.isNullOrBlank()) {
             showKeySheet = true

@@ -90,7 +90,7 @@ fun NewsScreen(
     val feature = filtered.firstOrNull()
     val rest = filtered.drop(1)
 
-    val refresh: () -> Unit = {
+    val refresh: () -> Unit = refresh@ {
         if (!container.newsRepo.hasKey()) {
             toast("请先在「新闻设置」里配置 DeepSeek Key")
             return@refresh

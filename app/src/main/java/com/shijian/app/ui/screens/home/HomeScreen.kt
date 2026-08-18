@@ -37,7 +37,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.LocalTextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -251,7 +250,7 @@ private fun CountdownCard(
                 color = Color.White,
                 fontSize = if (showCountdown) 44.sp else 24.sp,
                 fontWeight = FontWeight.Bold,
-                style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum")
+                style = MaterialTheme.typography.bodyLarge.copy(fontFeatureSettings = "tnum")
             )
             Spacer(Modifier.height(12.dp))
             Box(
@@ -411,7 +410,7 @@ private fun MiniStatCard(
             color = color,
             fontSize = 24.sp,
             fontWeight = FontWeight.Bold,
-            style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum")
+            style = MaterialTheme.typography.bodyLarge.copy(fontFeatureSettings = "tnum")
         )
         Spacer(Modifier.height(2.dp))
         Text(text = "共 $count 笔", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
@@ -588,7 +587,7 @@ private fun DayCell(
                         text = "+${FormatUtils.amount(info.income)}",
                         fontSize = 9.sp,
                         color = Success500,
-                        style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum")
+                        style = MaterialTheme.typography.bodyLarge.copy(fontFeatureSettings = "tnum")
                     )
                 }
                 if (info.expense > 0) {
@@ -596,7 +595,7 @@ private fun DayCell(
                         text = "-${FormatUtils.amount(info.expense)}",
                         fontSize = 9.sp,
                         color = Danger500,
-                        style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum")
+                        style = MaterialTheme.typography.bodyLarge.copy(fontFeatureSettings = "tnum")
                     )
                 }
             }

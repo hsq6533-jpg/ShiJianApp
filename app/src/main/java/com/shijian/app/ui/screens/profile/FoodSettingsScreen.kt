@@ -50,6 +50,7 @@ import com.shijian.app.ui.theme.TextSecondary
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
 
+/** 美食设置（设计稿：美食设置 + PRD 5.5） */
 @Composable
 fun FoodSettingsScreen(
     container: AppContainer,
@@ -81,10 +82,11 @@ fun FoodSettingsScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp)
         ) {
+            // ---- 高德 Key ----
             GroupTitle("高德 Key")
             SjCard(modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    text = if (keyConfigured) "已配置 用于搜索附近美食，仅保存在本机" else "未配置 用于搜索附近美食，仅保存在本机",
+                    text = if (keyConfigured) "✓ 已配置 · 用于搜索附近美食，仅保存在本机" else "未配置 · 用于搜索附近美食，仅保存在本机",
                     style = MaterialTheme.typography.bodySmall,
                     color = if (keyConfigured) Brand500 else TextSecondary
                 )
@@ -115,6 +117,7 @@ fun FoodSettingsScreen(
 
             Spacer(Modifier.height(16.dp))
 
+            // ---- 搜索范围 1-10km 自由滑杆 ----
             GroupTitle("搜索范围")
             SjCard(modifier = Modifier.fillMaxWidth()) {
                 Text(
@@ -125,13 +128,17 @@ fun FoodSettingsScreen(
                 Spacer(Modifier.height(12.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = settings.searchRadiusKm.toString(),
+                        text = "${settings.searchRadiusKm}",
                         color = Brand500,
                         fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.titleLarge
+                        style = MaterialTheme.typography.titleLarge.copy(fontFeatureSettings = "tnum")
                     )
-                    Spacer(Modifier.height(4.dp))
-                    Text(" 公里", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = " 公里",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondary
+                    )
                 }
                 Slider(
                     value = settings.searchRadiusKm.toFloat(),
@@ -157,18 +164,19 @@ fun FoodSettingsScreen(
 
             Spacer(Modifier.height(16.dp))
 
+            // ---- 其他 ----
             GroupTitle("其他")
             SjCard(modifier = Modifier.fillMaxWidth()) {
                 SwitchRow(
                     icon = "📍",
                     label = "多点位搜索",
-                    subtitle = "覆盖更大区域，结果更全",
+                    subtitle = "覆盖更大区域，结果更全（需要时开启）",
                     checked = settings.multiPointSearch,
                     onCheckedChange = { container.settingsRepo.setMultiPointSearch(it) },
                     iconBackground = Brand100
                 )
                 ListRow(
-                    icon = "",
+                    icon = "🗺️",
                     label = "地址管理",
                     value = "常用地址",
                     onClick = { nav(Routes.ADDRESS_MANAGE) },
@@ -185,11 +193,11 @@ fun FoodSettingsScreen(
                     .clickable { showClear = true },
                 contentAlignment = Alignment.Center
             ) {
-                Text(" 清除美食缓存", style = MaterialTheme.typography.labelLarge, color = Danger500)
+                Text("🗑 清除美食缓存", style = MaterialTheme.typography.labelLarge, color = Danger500)
             }
             Spacer(Modifier.height(24.dp))
             Text(
-                text = "时笺手机版 纯本地运行",
+                text = "时笺手机版 · 纯本地运行",
                 style = MaterialTheme.typography.bodySmall,
                 color = TextSecondary,
                 modifier = Modifier.fillMaxWidth(),
@@ -203,13 +211,14 @@ fun FoodSettingsScreen(
         AlertDialog(
             onDismissRequest = { showClear = false },
             title = { Text("清除美食缓存？") },
-            text = { Text("将删除本地缓存的搜索记录，下次搜索需重新请求。") },
+            text = { Text("将删除本地缓存的搜索记录（保留收藏与拉黑标记），下次搜索需重新请求。") },
             confirmButton = {
                 TextButton(onClick = {
                     showClear = false
                     scope.launch {
-                        runCatching { container.foodRepo.clearCache() }
-                            .onSuccess { toast("美食缓存已清除") }
+                        runCatching {
+                            container.foodRepo.clearCache()
+                        }.onSuccess { toast("美食缓存已清除") }
                             .onFailure { toast("清除失败，请重试") }
                     }
                 }) { Text("清除", color = Danger500) }

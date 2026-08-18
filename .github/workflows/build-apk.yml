@@ -6,6 +6,9 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -69,6 +72,24 @@ jobs:
           name: shijian-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           retention-days: 90
+
+      - name: Create GitHub Release and upload APK (公开直链，无需登录)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: "ShiJianApp v1.1.0 (Build ${{ github.run_number }})"
+          body: |
+            ## 时笺 App Debug 安装包
+            - 版本: 1.1.0 (Build ${{ github.run_number }})
+            - 构建时间: ${{ github.event.head_commit.timestamp || github.run_created_at }}
+            - 提交: ${{ github.sha }}
+
+            ### 下载说明
+            点击下方 **Assets** 中的 `ShiJianApp-debug.apk` 即可直接下载，**无需登录 GitHub**。
+          files: |
+            app/build/outputs/apk/debug/app-debug.apk
+          fail_on_unmatched_files: true
+          make_latest: true
 
       - name: Publish APK to public hosts (direct links, no login)
         shell: bash

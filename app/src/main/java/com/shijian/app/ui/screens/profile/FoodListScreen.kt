@@ -19,6 +19,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -52,12 +53,11 @@ fun FoodListScreen(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val isFavs = type == "favorites"
-    val list = if (isFavs)
-        remember { container.foodRepo.observeFavorites().catch { emit(emptyList()) } }
-            .collectAsStateWithLifecycle(initialValue = emptyList())
-    else
-        remember { container.foodRepo.observeBlacklisted().catch { emit(emptyList()) } }
-            .collectAsStateWithLifecycle(initialValue = emptyList())
+    val flow = remember(isFavs) {
+        if (isFavs) container.foodRepo.observeFavorites().catch { emit(emptyList()) }
+        else container.foodRepo.observeBlacklisted().catch { emit(emptyList()) }
+    }
+    val list by flow.collectAsStateWithLifecycle(initialValue = emptyList())
 
     val toast: (String) -> Unit = { msg -> Toast.makeText(context, msg, Toast.LENGTH_SHORT).show() }
 
@@ -71,7 +71,7 @@ fun FoodListScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp)
         ) {
-            if (list.value.isEmpty()) {
+            if (list.isEmpty()) {
                 EmptyState(
                     emoji = if (isFavs) "❤️" else "🚫",
                     title = if (isFavs) "还没有收藏的美食" else "拉黑列表为空",
@@ -82,7 +82,7 @@ fun FoodListScreen(
                 )
             } else {
                 Column(verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp)) {
-                    list.value.forEach { poi ->
+                    list.forEach { poi ->
                         PoiManageCard(
                             poi = poi,
                             isFavs = isFavs,

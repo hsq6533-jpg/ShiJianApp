@@ -1,5 +1,6 @@
 package com.shijian.app.ui.navigation
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountBalanceWallet
@@ -12,9 +13,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -29,49 +32,52 @@ private val TABS = listOf(
     TabItem(Routes.PROFILE, "我的", Icons.Filled.Person)
 )
 
-/** 底部导航：图标在上、文字在下，高度 ≥72dp */
+/** 底部导航：贴底显示，顶部加一条细边避免与内容混淆 */
 @Composable
 fun SjBottomBar(
     currentRoute: String?,
     onTabSelected: (String) -> Unit
 ) {
     val selectedBase = currentRoute?.substringBefore('?')
-    NavigationBar(
+    Surface(
         modifier = Modifier.navigationBarsPadding(),
-        containerColor = MaterialTheme.colorScheme.surface,
-        tonalElevation = 0.dp
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(0.5.dp, Color(0x1F000000))
     ) {
-        TABS.forEach { tab ->
-            val selected = selectedBase == tab.route
-            NavigationBarItem(
-                selected = selected,
-                onClick = {
-                    // 开销 Tab 注册路由带查询参数，跳转时填充默认空值
-                    val target = if (tab.route == Routes.EXPENSE) {
-                        Routes.EXPENSE_FILTER.replace("{filter}", "")
-                    } else {
-                        tab.route
-                    }
-                    onTabSelected(target)
-                },
-                icon = {
-                    Icon(
-                        imageVector = tab.icon,
-                        contentDescription = tab.label,
-                        modifier = Modifier.then(if (selected) Modifier else Modifier)
+        NavigationBar(
+            containerColor = MaterialTheme.colorScheme.surface,
+            tonalElevation = 0.dp
+        ) {
+            TABS.forEach { tab ->
+                val selected = selectedBase == tab.route
+                NavigationBarItem(
+                    selected = selected,
+                    onClick = {
+                        val target = if (tab.route == Routes.EXPENSE) {
+                            Routes.EXPENSE_FILTER.replace("{filter}", "")
+                        } else {
+                            tab.route
+                        }
+                        onTabSelected(target)
+                    },
+                    icon = {
+                        Icon(
+                            imageVector = tab.icon,
+                            contentDescription = tab.label
+                        )
+                    },
+                    label = {
+                        Text(text = tab.label, fontSize = 12.sp, maxLines = 1)
+                    },
+                    colors = NavigationBarItemDefaults.colors(
+                        selectedIconColor = MaterialTheme.colorScheme.primary,
+                        selectedTextColor = MaterialTheme.colorScheme.primary,
+                        unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
                     )
-                },
-                label = {
-                    Text(text = tab.label, fontSize = 12.sp, maxLines = 1)
-                },
-                colors = NavigationBarItemDefaults.colors(
-                    selectedIconColor = MaterialTheme.colorScheme.primary,
-                    selectedTextColor = MaterialTheme.colorScheme.primary,
-                    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
                 )
-            )
+            }
         }
     }
 }

@@ -25,8 +25,8 @@ jobs:
       - name: Build debug APK
         run: |
           chmod +x gradlew
-          set -o pipefail
-          ./gradlew assembleDebug --no-daemon --console=plain --stacktrace 2>&1 | tee build-output.log || true
+          ./gradlew assembleDebug --no-daemon --console=plain --stacktrace 2>&1 | tee build-output.log
+          exit "${PIPESTATUS[0]}"
 
       - name: Upload build output log
         if: always()

@@ -7,6 +7,7 @@ import com.shijian.app.data.db.entity.FoodPoiEntity
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.firstOrNull
 import kotlin.math.cos
 
 /** 美食仓库：本地缓存 + 高德多点位搜索 */
@@ -69,7 +70,7 @@ class FoodRepository(private val dao: FoodPoiDao) {
             val cachedCount = dao.cachedCount(centerKey, freshBefore)
             if (cachedCount > 0) {
                 val cached = dao.observeCached(centerKey, freshBefore)
-                kotlinx.coroutines.flow.firstOrNull(cached)?.let {
+                cached.firstOrNull()?.let {
                     _results.value = it.filter { p -> !p.isBlacklisted }
                 }
                 return false
@@ -140,7 +141,7 @@ class FoodRepository(private val dao: FoodPoiDao) {
             val freshBefore = System.currentTimeMillis() - CACHE_TTL
             if (dao.cachedCount(centerKey, freshBefore) > 0) {
                 val cached = dao.observeCached(centerKey, freshBefore)
-                kotlinx.coroutines.flow.firstOrNull(cached)?.let {
+                cached.firstOrNull()?.let {
                     _results.value = it.filter { p -> !p.isBlacklisted }
                 }
                 return

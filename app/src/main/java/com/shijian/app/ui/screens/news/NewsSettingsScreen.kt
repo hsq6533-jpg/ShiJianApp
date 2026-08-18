@@ -120,7 +120,7 @@ fun NewsSettingsScreen(
     }
     val specialCount = keywords.count { it.second }
 
-    Column(modifier = androidx.compose.foundation.layout.fillMaxWidth()) {
+    Column(modifier = Modifier.fillMaxWidth()) {
         SubPageTopBar(
             title = "新闻设置",
             onBack = onBack,

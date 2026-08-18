@@ -6,6 +6,8 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 
+private val BrandDarkContainer = androidx.compose.ui.graphics.Color(0xFF0A2845)
+
 private val LightColors = lightColorScheme(
     primary = Brand500,
     onPrimary = androidx.compose.ui.graphics.Color.White,
@@ -30,7 +32,7 @@ private val LightColors = lightColorScheme(
 private val DarkColors = darkColorScheme(
     primary = Brand500,
     onPrimary = androidx.compose.ui.graphics.Color.White,
-    primaryContainer = Color_0xFF0A2845,
+    primaryContainer = BrandDarkContainer,
     onPrimaryContainer = Brand100,
     secondary = Teal500,
     onSecondary = androidx.compose.ui.graphics.Color.Black,
@@ -47,8 +49,6 @@ private val DarkColors = darkColorScheme(
     outline = DividerColorDark,
     outlineVariant = DividerColorDark
 )
-
-private val Color_0xFF0A2845 = androidx.compose.ui.graphics.Color(0xFF0A2845)
 
 @Composable
 fun ShiJianTheme(

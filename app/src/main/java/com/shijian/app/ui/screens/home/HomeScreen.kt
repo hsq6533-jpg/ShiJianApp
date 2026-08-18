@@ -3,6 +3,7 @@ package com.shijian.app.ui.screens.home
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -36,6 +37,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.LocalTextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -249,7 +251,7 @@ private fun CountdownCard(
                 color = Color.White,
                 fontSize = if (showCountdown) 44.sp else 24.sp,
                 fontWeight = FontWeight.Bold,
-                fontFeatureSettings = "tnum"
+                style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum")
             )
             Spacer(Modifier.height(12.dp))
             Box(
@@ -409,7 +411,7 @@ private fun MiniStatCard(
             color = color,
             fontSize = 24.sp,
             fontWeight = FontWeight.Bold,
-            fontFeatureSettings = "tnum"
+            style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum")
         )
         Spacer(Modifier.height(2.dp))
         Text(text = "共 $count 笔", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
@@ -586,7 +588,7 @@ private fun DayCell(
                         text = "+${FormatUtils.amount(info.income)}",
                         fontSize = 9.sp,
                         color = Success500,
-                        fontFeatureSettings = "tnum"
+                        style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum")
                     )
                 }
                 if (info.expense > 0) {
@@ -594,7 +596,7 @@ private fun DayCell(
                         text = "-${FormatUtils.amount(info.expense)}",
                         fontSize = 9.sp,
                         color = Danger500,
-                        fontFeatureSettings = "tnum"
+                        style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum")
                     )
                 }
             }
@@ -661,9 +663,8 @@ private fun WeekBreakdownCard(weekList: List<TransactionEntity>, onClick: () -> 
                     Spacer(Modifier.width(10.dp))
                     Text(
                         text = "¥${String.format("%.2f", amount)}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        fontFeatureSettings = "tnum"
+                        style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"),
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                 }
                 if (i < byCategory.lastIndex) Spacer(Modifier.height(10.dp))

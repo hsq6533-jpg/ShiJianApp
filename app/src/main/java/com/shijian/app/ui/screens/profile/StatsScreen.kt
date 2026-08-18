@@ -201,10 +201,9 @@ private fun SummaryCard(title: String, amount: Double, color: Color, modifier: M
         Spacer(Modifier.height(4.dp))
         Text(
             text = "¥${java.text.NumberFormat.getInstance().format(amount)}",
-            style = MaterialTheme.typography.titleMedium,
+            style = MaterialTheme.typography.titleMedium.copy(fontFeatureSettings = "tnum"),
             fontWeight = FontWeight.Bold,
             color = color,
-            fontFeatureSettings = "tnum",
             maxLines = 1
         )
     }
@@ -291,9 +290,8 @@ private fun CategoryRatioRow(name: String, ratio: Double, color: Color) {
             )
             Text(
                 text = "${(ratio * 100).toInt()}%",
-                style = MaterialTheme.typography.bodyMedium,
-                color = TextSecondary,
-                fontFeatureSettings = "tnum"
+                style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = "tnum"),
+                color = TextSecondary
             )
         }
         Spacer(Modifier.height(5.dp))

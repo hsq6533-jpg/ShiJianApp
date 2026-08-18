@@ -93,7 +93,7 @@ fun NewsScreen(
     val refresh: () -> Unit = {
         if (!container.newsRepo.hasKey()) {
             toast("请先在「新闻设置」里配置 DeepSeek Key")
-            return@let
+            return@refresh
         }
         refreshing = true
         scope.launch {

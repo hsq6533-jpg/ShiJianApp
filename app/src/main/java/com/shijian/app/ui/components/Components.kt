@@ -195,8 +195,7 @@ fun AmountText(
         color = color,
         fontSize = fontSize,
         fontWeight = fontWeight,
-        style = MaterialTheme.typography.bodyLarge,
-        fontFeatureSettings = "tnum"
+        style = MaterialTheme.typography.bodyLarge.copy(fontFeatureSettings = "tnum")
     )
 }
 
@@ -212,7 +211,7 @@ fun CategoryBadge(
         modifier = modifier.size(size).background(background, MaterialTheme.shapes.medium),
         contentAlignment = Alignment.Center
     ) {
-        Text(text = emoji, fontSize = size * 0.5f)
+        Text(text = emoji, fontSize = (size.value * 0.5f).sp)
     }
 }
 

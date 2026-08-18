@@ -205,20 +205,20 @@ fun ProfileScreen(
                 }
                 Spacer(Modifier.height(16.dp))
                 Row {
-                    ProfileStat(dayCount, "记账天数")
-                    ProfileStat(recordCount, "记录总数")
-                    ProfileStat(streak, "连续打卡")
+                    ProfileStat(dayCount, "记账天数", Modifier.weight(1f))
+                    ProfileStat(recordCount, "记录总数", Modifier.weight(1f))
+                    ProfileStat(streak, "连续打卡", Modifier.weight(1f))
                 }
             }
 
             // ---- 外观与习惯 ----
             GroupTitle("外观与习惯")
             SjCard(modifier = Modifier.fillMaxWidth()) {
-                ProfileRow("🌙", Brand100, Brand500, "深色模式", settings.darkMode.label) { showDarkMode = true }
+                ProfileRow("🌙", Brand100, Brand500, "深色模式", settings.darkMode.label, onClick = { showDarkMode = true })
                 DividerLine()
-                ProfileRow("⏰", Purple100, Purple500, "工作时间", workTimeLabel(settings)) { showWorkTime = true }
+                ProfileRow("⏰", Purple100, Purple500, "工作时间", workTimeLabel(settings), onClick = { showWorkTime = true })
                 DividerLine()
-                ProfileRow("📅", Teal100, Teal500, "休息模式", settings.restMode.label) { showRestMode = true }
+                ProfileRow("📅", Teal100, Teal500, "休息模式", settings.restMode.label, onClick = { showRestMode = true })
                 DividerLine()
                 SwitchRow(
                     icon = "🔔",
@@ -229,39 +229,39 @@ fun ProfileScreen(
                     iconBackground = Orange100
                 )
                 DividerLine()
-                ProfileRow("📰", Brand100, Brand500, "新闻设置", newsSummary) { nav(Routes.NEWS_SETTINGS) }
+                ProfileRow("📰", Brand100, Brand500, "新闻设置", newsSummary, onClick = { nav(Routes.NEWS_SETTINGS) })
                 DividerLine()
-                ProfileRow("📢", Purple100, Purple500, "更新公告", "v${BuildConfig.VERSION_NAME}") { nav(Routes.UPDATES) }
+                ProfileRow("📢", Purple100, Purple500, "更新公告", "v${BuildConfig.VERSION_NAME}", onClick = { nav(Routes.UPDATES) })
             }
 
             // ---- 美食设置 ----
             GroupTitle("美食设置")
             SjCard(modifier = Modifier.fillMaxWidth()) {
-                ProfileRow("❤️", Danger100, Danger500, "收藏管理", "${favs.size} 家") { nav(Routes.FOOD_LIST.replace("{type}", "favorites")) }
+                ProfileRow("❤️", Danger100, Danger500, "收藏管理", "${favs.size} 家", onClick = { nav(Routes.FOOD_LIST.replace("{type}", "favorites")) })
                 DividerLine()
-                ProfileRow("🚫", MaterialTheme.colorScheme.surfaceVariant, TextSecondary, "拉黑管理", "${blocks.size} 家") { nav(Routes.FOOD_LIST.replace("{type}", "blocked")) }
+                ProfileRow("🚫", MaterialTheme.colorScheme.surfaceVariant, TextSecondary, "拉黑管理", "${blocks.size} 家", onClick = { nav(Routes.FOOD_LIST.replace("{type}", "blocked")) })
                 DividerLine()
-                ProfileRow("📍", Brand100, Brand500, "地址管理", "常用地址") { nav(Routes.ADDRESS_MANAGE) }
+                ProfileRow("📍", Brand100, Brand500, "地址管理", "常用地址", onClick = { nav(Routes.ADDRESS_MANAGE) })
                 DividerLine()
-                ProfileRow("🍜", Orange100, Orange500, "美食设置", "高德 Key · 范围") { nav(Routes.FOOD_SETTINGS) }
+                ProfileRow("🍜", Orange100, Orange500, "美食设置", "高德 Key · 范围", onClick = { nav(Routes.FOOD_SETTINGS) })
             }
 
             // ---- 数据与备份 ----
             GroupTitle("数据与备份")
             SjCard(modifier = Modifier.fillMaxWidth()) {
-                ProfileRow("💾", Brand100, Brand500, "备份与恢复", "导出 · 导入") { showBackup = true }
+                ProfileRow("💾", Brand100, Brand500, "备份与恢复", "导出 · 导入", onClick = { showBackup = true })
                 DividerLine()
-                ProfileRow("📊", Success100, Success500, "数据统计", "月报 · 年报") { nav(Routes.STATS) }
+                ProfileRow("📊", Success100, Success500, "数据统计", "月报 · 年报", onClick = { nav(Routes.STATS) })
                 DividerLine()
-                ProfileRow("🗑", MaterialTheme.colorScheme.surfaceVariant, Danger500, "清空数据", null, danger = true) { showClear = true }
+                ProfileRow("🗑", MaterialTheme.colorScheme.surfaceVariant, Danger500, "清空数据", null, onClick = { showClear = true }, danger = true)
             }
 
             // ---- 关于 ----
             GroupTitle("关于")
             SjCard(modifier = Modifier.fillMaxWidth()) {
-                ProfileRow("ℹ️", Purple100, Purple500, "更新与关于", "v${BuildConfig.VERSION_NAME} 手机版") { nav(Routes.UPDATES) }
+                ProfileRow("ℹ️", Purple100, Purple500, "更新与关于", "v${BuildConfig.VERSION_NAME} 手机版", onClick = { nav(Routes.UPDATES) })
                 DividerLine()
-                ProfileRow("🔒", Teal100, Teal500, "隐私说明", "数据不出设备") { nav(Routes.PRIVACY) }
+                ProfileRow("🔒", Teal100, Teal500, "隐私说明", "数据不出设备", onClick = { nav(Routes.PRIVACY) })
             }
 
             Spacer(Modifier.height(20.dp))
@@ -403,16 +403,15 @@ private fun streakDays(all: List<TransactionEntity>): Int {
 }
 
 @Composable
-private fun ProfileStat(value: Int, label: String) {
+private fun ProfileStat(value: Int, label: String, modifier: Modifier = Modifier) {
     Column(
-        modifier = Modifier.weight(1f),
+        modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
             text = value.toString(),
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
-            fontFeatureSettings = "tnum"
+            style = MaterialTheme.typography.titleLarge.copy(fontFeatureSettings = "tnum"),
+            fontWeight = FontWeight.Bold
         )
         Spacer(Modifier.height(2.dp))
         Text(text = label, style = MaterialTheme.typography.labelSmall, color = TextSecondary)
@@ -598,13 +597,23 @@ private fun WorkTimeSheet(
             Spacer(Modifier.height(16.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("上班", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                Text("${hh(start)}:00", color = Brand500, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum")
+                Text(
+                    text = "${hh(start)}:00",
+                    color = Brand500,
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = "tnum")
+                )
             }
             Slider(value = (start / 60).toFloat(), onValueChange = { start = it.toInt() * 60 }, valueRange = 0f..23f)
             Spacer(Modifier.height(6.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("下班", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                Text("${hh(end)}:00", color = Brand500, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum")
+                Text(
+                    text = "${hh(end)}:00",
+                    color = Brand500,
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = "tnum")
+                )
             }
             Slider(value = (end / 60).toFloat(), onValueChange = { end = it.toInt() * 60 }, valueRange = 0f..23f)
             Spacer(Modifier.height(18.dp))

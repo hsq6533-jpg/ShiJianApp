@@ -1,5 +1,8 @@
+@file:OptIn(ExperimentalFoundationApi::class)
+
 package com.shijian.app.ui.screens.expense
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -196,7 +199,7 @@ private fun SummaryCell(modifier: Modifier, label: String, value: String, color:
             color = color,
             fontSize = 17.sp,
             fontWeight = FontWeight.Bold,
-            fontFeatureSettings = "tnum"
+            style = MaterialTheme.typography.bodyLarge.copy(fontFeatureSettings = "tnum")
         )
     }
 }
@@ -269,7 +272,7 @@ private fun CalendarRow(
             color = amountColor,
             fontSize = 15.sp,
             fontWeight = FontWeight.SemiBold,
-            fontFeatureSettings = "tnum"
+            style = MaterialTheme.typography.bodyLarge.copy(fontFeatureSettings = "tnum")
         )
     }
 }

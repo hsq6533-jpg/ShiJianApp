@@ -59,10 +59,9 @@ fun UpdatesScreen(onBack: () -> Unit) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
                         text = "v${BuildConfig.VERSION_NAME}",
-                        style = MaterialTheme.typography.headlineMedium,
+                        style = MaterialTheme.typography.headlineMedium.copy(fontFeatureSettings = "tnum"),
                         color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontFeatureSettings = "tnum"
+                        fontWeight = FontWeight.Bold
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(

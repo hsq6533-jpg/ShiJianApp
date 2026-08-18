@@ -10,8 +10,7 @@ import com.shijian.app.data.repo.BackupRepository
 import com.shijian.app.data.repo.FoodRepository
 import com.shijian.app.data.repo.NewsRepository
 import com.shijian.app.data.repo.TransactionRepository
-import net.zetetic.database.sqlcipher.SupportFactory
-import net.sqlcipher.database.SQLiteDatabase
+import net.zetetic.android.database.sqlcipher.SupportFactory
 
 /**
  * 手动依赖容器（无 Hilt，保持轻量）
@@ -26,7 +25,7 @@ class AppContainer(context: Context) {
     val database: AppDatabase = run {
         val passphrase = securePrefs.getDbPassphrase()
         Room.databaseBuilder(context, AppDatabase::class.java, "shijian.db")
-            .openHelperFactory(SupportFactory(SQLiteDatabase.getBytes(passphrase.toCharArray())))
+            .openHelperFactory(SupportFactory(passphrase.toByteArray()))
             .fallbackToDestructiveMigration()
             .build()
     }

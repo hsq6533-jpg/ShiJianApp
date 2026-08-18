@@ -26,7 +26,6 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TimePicker
-import androidx.compose.material3.TimePickerDialog
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
@@ -87,7 +86,7 @@ fun AddRecordScreen(
     var amountText by rememberSaveableCompat("")
     var remark by rememberSaveableCompat("")
     var merchant by rememberSaveableCompat("")
-    var reimbursable by rememberSaveableCompat(false)
+    var reimbursable by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     var date by remember { mutableStateOf(defaultDate) }
     var time by remember { mutableStateOf(LocalTime.now()) }
 
@@ -390,16 +389,11 @@ fun AddRecordScreen(
 
     if (showTimePicker) {
         val timeState = rememberTimePickerState(initialHour = time.hour, initialMinute = time.minute, is24Hour = true)
-        TimePickerDialog(
-            onDismissRequest = { showTimePicker = false },
-            confirmButton = {
-                TextButton(onClick = {
-                    time = LocalTime.of(timeState.hour, timeState.minute)
-                    showTimePicker = false
-                }) { Text("确定") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showTimePicker = false }) { Text("取消") }
+        SjTimePickerDialog(
+            onDismiss = { showTimePicker = false },
+            onConfirm = {
+                time = LocalTime.of(timeState.hour, timeState.minute)
+                showTimePicker = false
             }
         ) {
             TimePicker(state = timeState)
@@ -424,3 +418,14 @@ private fun chunkedCategories(categories: List<com.shijian.app.data.db.entity.Ca
 @Composable
 private fun rememberSaveableCompat(initial: String) =
     androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(initial) }
+
+@Composable
+private fun SjTimePickerDialog(onDismiss: () -> Unit, onConfirm: () -> Unit, content: @Composable () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = { TextButton(onClick = onConfirm) { Text("确定") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        title = { Text("选择时间") },
+        text = { content() }
+    )
+}

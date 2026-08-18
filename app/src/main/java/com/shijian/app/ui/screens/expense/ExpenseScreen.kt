@@ -1,5 +1,8 @@
+@file:OptIn(ExperimentalFoundationApi::class)
+
 package com.shijian.app.ui.screens.expense
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -55,6 +58,7 @@ import com.shijian.app.ui.theme.TextSecondary
 import com.shijian.app.util.DateUtils
 import com.shijian.app.util.FormatUtils
 import com.shijian.app.util.categoryEmoji
+import kotlinx.coroutines.launch
 import java.time.LocalDate
 
 @Composable
@@ -218,7 +222,7 @@ private fun StatCell(modifier: Modifier, title: String, amount: Double, count: I
             color = color,
             fontSize = 19.sp,
             fontWeight = FontWeight.Bold,
-            fontFeatureSettings = "tnum"
+            style = MaterialTheme.typography.bodyLarge.copy(fontFeatureSettings = "tnum")
         )
         Spacer(Modifier.height(2.dp))
         Text(text = "共 $count 笔", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
@@ -290,7 +294,7 @@ fun TransactionGroupedList(
                 else DateUtils.dateLabel(date),
                 style = MaterialTheme.typography.labelMedium,
                 color = TextSecondary,
-                modifier = Modifier.padding(vertical = 10.dp, start = 4.dp)
+                modifier = Modifier.padding(start = 4.dp, top = 10.dp, bottom = 10.dp)
             )
             SjCard(modifier = Modifier.fillMaxWidth()) {
                 items.forEachIndexed { i, t ->
@@ -368,7 +372,7 @@ fun TransactionRow(
             color = if (t.type == "INCOME") Success500 else Danger500,
             fontSize = 16.sp,
             fontWeight = FontWeight.SemiBold,
-            fontFeatureSettings = "tnum"
+            style = MaterialTheme.typography.bodyLarge.copy(fontFeatureSettings = "tnum")
         )
     }
 }

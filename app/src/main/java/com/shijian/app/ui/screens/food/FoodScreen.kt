@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalFoundationApi::class)
+
 package com.shijian.app.ui.screens.food
 
 import android.Manifest
@@ -5,6 +7,7 @@ import android.content.pm.PackageManager
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -12,6 +15,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -136,7 +140,7 @@ fun FoodScreen(
     }
 
     // 随机推荐：进入页面自动挑一个
-    val pick = {
+    val pick: () -> Unit = {
         picking = true
         scope.launch {
             picked = container.foodRepo.randomPick()
@@ -148,6 +152,7 @@ fun FoodScreen(
     val toast: (String) -> Unit = { msg -> Toast.makeText(context, msg, Toast.LENGTH_SHORT).show() }
 
     // 定位权限申请
+    var useGps: () -> Unit = {}
     val locationPermLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -158,22 +163,22 @@ fun FoodScreen(
         }
     }
 
-    fun useGps() {
+    useGps = {
         val granted = ContextCompat.checkSelfPermission(
             context, Manifest.permission.ACCESS_FINE_LOCATION
         ) == PackageManager.PERMISSION_GRANTED
         if (!granted) {
             locationPermLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
-            return
-        }
-        scope.launch {
-            pickingLocation = true
-            val loc = LocationUtils.getCurrentLocation(context)
-            pickingLocation = false
-            if (loc != null) {
-                center = SearchCenter("我的定位", loc.latitude, loc.longitude)
-            } else {
-                toast("定位失败，请检查定位是否开启")
+        } else {
+            scope.launch {
+                pickingLocation = true
+                val loc = LocationUtils.getCurrentLocation(context)
+                pickingLocation = false
+                if (loc != null) {
+                    center = SearchCenter("我的定位", loc.latitude, loc.longitude)
+                } else {
+                    toast("定位失败，请检查定位是否开启")
+                }
             }
         }
     }
@@ -183,7 +188,7 @@ fun FoodScreen(
         if (key.isNullOrBlank()) {
             showKeySheet = true
             toast("请先配置高德 Key")
-            return@let
+            return@doSearch
         }
         hasSearched = true
         scope.launch {
@@ -725,7 +730,7 @@ private fun FoodPoiCard(
 }
 
 @Composable
-private fun ActionPill(
+private fun RowScope.ActionPill(
     icon: @Composable () -> Unit,
     text: String,
     tint: Color?,

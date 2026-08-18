@@ -8,6 +8,7 @@ import com.shijian.app.data.db.entity.SearchAddressEntity
 import com.shijian.app.data.db.entity.TransactionEntity
 import com.shijian.app.data.prefs.SecurePrefs
 import com.shijian.app.util.CryptoUtil
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -27,10 +28,10 @@ class BackupRepository(
     suspend fun export(encrypted: Boolean): ByteArray {
         val data = BackupData(
             exportedAt = System.currentTimeMillis(),
-            transactions = db.transactionDao().run { kotlinx.coroutines.flow.firstOrNull(observeAll()) ?: emptyList() },
+            transactions = db.transactionDao().run { observeAll().firstOrNull() ?: emptyList() },
             categories = db.categoryDao().getAll(),
-            addresses = db.searchAddressDao().run { kotlinx.coroutines.flow.firstOrNull(observeAll()) ?: emptyList() },
-            foodPois = db.foodPoiDao().run { kotlinx.coroutines.flow.firstOrNull(observeAll()) ?: emptyList() },
+            addresses = db.searchAddressDao().run { observeAll().firstOrNull() ?: emptyList() },
+            foodPois = db.foodPoiDao().run { observeAll().firstOrNull() ?: emptyList() },
             newsConfig = db.newsDao().getConfig()
         )
         val bytes = json.encodeToString(BackupData.serializer(), data).toByteArray(Charsets.UTF_8)
@@ -48,9 +49,8 @@ class BackupRepository(
         db.transactionDao().clearAll()
         db.categoryDao().insertAll(raw.categories)
         db.searchAddressDao().let { dao ->
-            dao.observeAll().let { flow ->
-                kotlinx.coroutines.flow.firstOrNull(flow)?.forEach { dao.delete(it) }
-            }
+            val list = dao.observeAll().firstOrNull() ?: emptyList()
+            list.forEach { dao.delete(it) }
             raw.addresses.forEach { dao.insert(it) }
         }
         db.foodPoiDao().clearAll()

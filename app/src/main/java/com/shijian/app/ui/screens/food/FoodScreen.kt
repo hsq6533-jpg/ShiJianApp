@@ -69,7 +69,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.shijian.app.AppContainer
-import com.shijian.app.data.db.entity.AppSettings
+import com.shijian.app.data.prefs.AppSettings
 import com.shijian.app.data.db.entity.FoodPoiEntity
 import com.shijian.app.data.db.entity.SearchAddressEntity
 import com.shijian.app.data.repo.FoodRepository

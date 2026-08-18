@@ -66,14 +66,13 @@ class AppContainer(context: Context) {
         }
 
         private fun buildRoom(ctx: Context, factory: SupportFactory?): AppDatabase {
-            val builder = androidx.room.Room.databaseBuilder(ctx, AppDatabase::class.java, "shijian.db")
-                .fallbackToDestructiveMigration()
-                .addMigrations(AppDatabase.MIGRATION_1_2)
-            if (factory != null) {
-                builder.openHelperFactory(factory)
-            }
-            return builder.build()
+        val builder = androidx.room.Room.databaseBuilder(ctx, AppDatabase::class.java, "shijian.db")
+            .fallbackToDestructiveMigration()
+        if (factory != null) {
+            builder.openHelperFactory(factory)
         }
+        return builder.build()
+    }
 
         private fun deleteDbFiles(ctx: Context) {
             runCatching {

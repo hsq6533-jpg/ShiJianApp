@@ -48,7 +48,7 @@ class FoodRepository(private val dao: FoodPoiDao) {
         runCatching { dao.randomFavorite() ?: dao.randomActive() }.getOrNull()
     }
 
-    /** 周边搜索（7.1）。任何异常捕获并写入 error，不抛。 */
+    /** 周边搜索。pagesPerPoint：每个点位最多翻几页；multiPoint=true 时会按半径拆多个子点。 */
     suspend fun searchAround(
         amapKey: String,
         lat: Double,
@@ -56,12 +56,12 @@ class FoodRepository(private val dao: FoodPoiDao) {
         radiusKm: Int,
         keywords: String?,
         foodType: String?,
-        multiPoint: Boolean
+        multiPoint: Boolean,
+        pagesPerPoint: Int = 2
     ): Boolean = withContext(Dispatchers.IO) {
         _searching.value = true
         _error.value = null
         try {
-            // 缓存 key 必须包含关键词/分类，否则不同搜索会互相串缓存
             val centerKey = "${lng},${lat}|${radiusKm}|${keywords ?: ""}|${foodType ?: ""}"
             val freshBefore = System.currentTimeMillis() - CACHE_TTL
             val cachedCount = runCatching { dao.cachedCount(centerKey, freshBefore) }.getOrDefault(0)
@@ -76,18 +76,22 @@ class FoodRepository(private val dao: FoodPoiDao) {
             val types = FOOD_TYPES[foodType] ?: FOOD_TYPES["全部"] ?: "050000"
             val raw = mutableListOf<AmapPoi>()
             val seen = HashSet<String>()
+            val pagesLimit = pagesPerPoint.coerceAtLeast(1)
+            var hitQpsLimit = false
 
             if (multiPoint) {
                 val n = when {
-                    radiusKm <= 2 -> 3
-                    radiusKm <= 5 -> 5
-                    else -> 7
+                    radiusKm <= 2 -> 2
+                    radiusKm <= 5 -> 3
+                    else -> 4
                 }
                 val points = runCatching { samplePoints(lat, lng, radiusKm, n) }.getOrDefault(listOf(lat to lng))
                 var calls = 0
+                val maxCalls = (n * pagesLimit).coerceAtMost(18)
+                pointsLoop@
                 for ((plat, plng) in points) {
                     var page = 1
-                    while (page <= MAX_PAGES_PER_POINT && calls < MAX_TOTAL_CALLS) {
+                    while (page <= pagesLimit && calls < maxCalls) {
                         val resp = ApiClient.amap.around(
                             key = amapKey,
                             location = "$plng,$plat",
@@ -98,8 +102,10 @@ class FoodRepository(private val dao: FoodPoiDao) {
                         )
                         calls++
                         if (resp.status != "1") {
-                            _error.value = resp.info.ifBlank { "高德返回错误：${resp.status}" }
-                            break
+                            val info = resp.info.ifBlank { "高德返回错误：${resp.status}" }
+                            _error.value = info
+                            if (info.contains("CUQPS", ignoreCase = true)) hitQpsLimit = true
+                            break@pointsLoop
                         }
                         if (resp.pois.isEmpty()) break
                         resp.pois.forEach { p -> if (seen.add(p.id)) raw.add(p) }
@@ -108,7 +114,7 @@ class FoodRepository(private val dao: FoodPoiDao) {
                 }
             } else {
                 var page = 1
-                while (page <= MAX_PAGES_PER_POINT) {
+                while (page <= pagesLimit) {
                     val resp = ApiClient.amap.around(
                         key = amapKey,
                         location = "$lng,$lat",
@@ -118,7 +124,9 @@ class FoodRepository(private val dao: FoodPoiDao) {
                         page = page
                     )
                     if (resp.status != "1") {
-                        _error.value = resp.info.ifBlank { "高德返回错误：${resp.status}" }
+                        val info = resp.info.ifBlank { "高德返回错误：${resp.status}" }
+                        _error.value = info
+                        if (info.contains("CUQPS", ignoreCase = true)) hitQpsLimit = true
                         break
                     }
                     if (resp.pois.isEmpty()) break
@@ -129,9 +137,14 @@ class FoodRepository(private val dao: FoodPoiDao) {
 
             val now = System.currentTimeMillis()
             val entities = raw.mapNotNull { it.toEntityOrNull(centerKey, now) }
-            runCatching { dao.upsertAll(entities) }
+            if (entities.isNotEmpty()) {
+                runCatching { dao.upsertAll(entities) }
+            }
             _results.value = entities.filter { !it.isBlacklisted }
-            true
+            if (hitQpsLimit && entities.isNotEmpty()) {
+                _error.value = null
+            }
+            entities.isNotEmpty() || !hitQpsLimit
         } catch (e: Exception) {
             _error.value = "搜索失败：${e.message ?: "网络或 Key 异常"}"
             false
@@ -140,7 +153,7 @@ class FoodRepository(private val dao: FoodPoiDao) {
         }
     }
 
-    suspend fun searchByKeyword(amapKey: String, keyword: String, city: String?) {
+    suspend fun searchByKeyword(amapKey: String, keyword: String, city: String?, pages: Int = 1) {
         withContext(Dispatchers.IO) {
             _searching.value = true
             _error.value = null
@@ -158,10 +171,14 @@ class FoodRepository(private val dao: FoodPoiDao) {
                 val raw = mutableListOf<AmapPoi>()
                 val seen = HashSet<String>()
                 var page = 1
-                while (page <= MAX_PAGES_PER_POINT) {
+                val pagesLimit = pages.coerceAtLeast(1)
+                var hitQps = false
+                while (page <= pagesLimit) {
                     val resp = ApiClient.amap.text(amapKey, keyword, city, page = page)
                     if (resp.status != "1") {
-                        _error.value = resp.info.ifBlank { "高德返回错误：${resp.status}" }
+                        val info = resp.info.ifBlank { "高德返回错误：${resp.status}" }
+                        _error.value = info
+                        if (info.contains("CUQPS", ignoreCase = true)) hitQps = true
                         break
                     }
                     if (resp.pois.isEmpty()) break
@@ -170,8 +187,9 @@ class FoodRepository(private val dao: FoodPoiDao) {
                 }
                 val now = System.currentTimeMillis()
                 val entities = raw.mapNotNull { it.toEntityOrNull(centerKey, now) }
-                runCatching { dao.upsertAll(entities) }
+                if (entities.isNotEmpty()) runCatching { dao.upsertAll(entities) }
                 _results.value = entities.filter { !it.isBlacklisted }
+                if (hitQps && entities.isNotEmpty()) _error.value = null
             } catch (e: Exception) {
                 _error.value = "搜索失败：${e.message ?: "网络或 Key 异常"}"
             } finally {
@@ -185,7 +203,8 @@ class FoodRepository(private val dao: FoodPoiDao) {
         address: String,
         city: String?,
         radiusKm: Int,
-        multiPoint: Boolean
+        multiPoint: Boolean,
+        pagesPerPoint: Int = 1
     ) {
         withContext(Dispatchers.IO) {
             _searching.value = true
@@ -197,7 +216,7 @@ class FoodRepository(private val dao: FoodPoiDao) {
                     ?: throw IllegalStateException("未解析到地址坐标")
                 val parts = loc.split(",")
                 if (parts.size != 2) throw IllegalStateException("坐标格式异常")
-                searchAround(amapKey, parts[1].toDouble(), parts[0].toDouble(), radiusKm, null, null, multiPoint)
+                searchAround(amapKey, parts[1].toDouble(), parts[0].toDouble(), radiusKm, null, null, multiPoint, pagesPerPoint)
             } catch (e: Exception) {
                 _error.value = "地址搜索失败：${e.message ?: "地址或 Key 异常"}"
                 _searching.value = false

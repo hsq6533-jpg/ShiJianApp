@@ -3,6 +3,7 @@ package com.shijian.app.ui.screens.profile
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -17,6 +18,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -121,37 +123,42 @@ fun FoodSettingsScreen(
             GroupTitle("搜索范围")
             SjCard(modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    text = "推荐半径，范围越大搜索越慢",
+                    text = "范围越大结果越全，调用量也越大",
                     style = MaterialTheme.typography.bodySmall,
                     color = TextSecondary
                 )
                 Spacer(Modifier.height(12.dp))
-                Row(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
-                    RADIUS_OPTIONS.forEach { km ->
-                        val sel = settings.searchRadiusKm == km
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .background(
-                                    if (sel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                                    RoundedCornerShape(10.dp)
-                                )
-                                .clickable { container.settingsRepo.setSearchRadiusKm(km) }
-                                .padding(vertical = 9.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "$km km",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (sel) Color.White else MaterialTheme.colorScheme.onSurface,
-                                fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal
-                            )
-                        }
-                    }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "${settings.searchRadiusKm}",
+                        color = Brand500,
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleLarge.copy(fontFeatureSettings = "tnum")
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = " 公里",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondary
+                    )
                 }
-                Spacer(Modifier.height(4.dp))
+                Slider(
+                    value = settings.searchRadiusKm.toFloat(),
+                    onValueChange = { container.settingsRepo.setSearchRadiusKm(it.toInt().coerceIn(1, 10)) },
+                    valueRange = 1f..10f,
+                    steps = 8
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("1 km", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                    Text("5 km", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                    Text("10 km", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                }
+                Spacer(Modifier.height(6.dp))
                 Text(
-                    text = "当前 ${settings.searchRadiusKm} km · 距离中心点",
+                    text = "距离中心点，按设置内搜索范围检索",
                     style = MaterialTheme.typography.labelSmall,
                     color = TextSecondary
                 )

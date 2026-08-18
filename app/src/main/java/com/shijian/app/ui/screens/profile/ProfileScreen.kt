@@ -1,13 +1,13 @@
+@file:OptIn(ExperimentalMaterial3Api::class)
+
 package com.shijian.app.ui.screens.profile
 
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
-import android.widget.Toast
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import android.content.Intent
+import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -21,8 +21,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
@@ -39,7 +42,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -49,237 +51,274 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.shijian.app.AppContainer
 import com.shijian.app.BuildConfig
-import com.shijian.app.data.db.entity.TransactionEntity
+import com.shijian.app.R
+import com.shijian.app.data.UpdatesData
 import com.shijian.app.data.prefs.AppSettings
-import com.shijian.app.data.prefs.DarkMode
 import com.shijian.app.data.prefs.RestMode
+import com.shijian.app.ui.components.ListRow
 import com.shijian.app.ui.components.SjCard
-import com.shijian.app.ui.components.SwitchRow
+import com.shijian.app.ui.components.SubPageTopBar
+import com.shijian.app.ui.components.SjPrimaryButtonSmall
 import com.shijian.app.ui.components.TabTopBar
+import com.shijian.app.ui.components.WorkModeBadge
 import com.shijian.app.ui.navigation.Routes
 import com.shijian.app.ui.theme.Brand100
 import com.shijian.app.ui.theme.Brand500
-import com.shijian.app.ui.theme.Danger100
+import com.shijian.app.ui.theme.Brand600
 import com.shijian.app.ui.theme.Danger500
-import com.shijian.app.ui.theme.Orange100
-import com.shijian.app.ui.theme.Orange500
+import com.shijian.app.ui.theme.Green100
+import com.shijian.app.ui.theme.Green500
 import com.shijian.app.ui.theme.Purple100
 import com.shijian.app.ui.theme.Purple500
-import com.shijian.app.ui.theme.Success100
-import com.shijian.app.ui.theme.Success500
-import com.shijian.app.ui.theme.Teal100
-import com.shijian.app.ui.theme.Teal500
 import com.shijian.app.ui.theme.TextSecondary
-import com.shijian.app.util.DateUtils
 import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import java.time.LocalDate
-import java.time.format.DateTimeFormatter
 
-/** 我的页（设计稿：我的 + PRD 4.5） */
+/** 我的 Tab（PRD 1.6）：头像、工作时间、休息模式、美食/新闻设置、隐私、关于、更新 */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileScreen(
     container: AppContainer,
     nav: (String) -> Unit
 ) {
-    val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val settings by remember {
         container.settingsRepo.settings
             .catch { emit(AppSettings()) }
     }.collectAsStateWithLifecycle(initialValue = AppSettings())
 
-    var recordCount by remember { mutableStateOf(0) }
-    var dayCount by remember { mutableStateOf(0) }
-    var streak by remember { mutableStateOf(0) }
-    var newsSummary by remember { mutableStateOf("每天 8:00") }
-
-    val favs by remember {
-        container.foodRepo.observeFavorites()
-            .catch { emit(emptyList()) }
-    }.collectAsStateWithLifecycle(initialValue = emptyList())
-    val blocks by remember {
-        container.foodRepo.observeBlacklisted()
-            .catch { emit(emptyList()) }
-    }.collectAsStateWithLifecycle(initialValue = emptyList())
-
-    // 弹窗状态
-    var showBackup by remember { mutableStateOf(false) }
-    var showClear by remember { mutableStateOf(false) }
     var showWorkTime by remember { mutableStateOf(false) }
     var showRestMode by remember { mutableStateOf(false) }
-    var showDarkMode by remember { mutableStateOf(false) }
-    var showUserName by remember { mutableStateOf(false) }
+    var showAbout by remember { mutableStateOf(false) }
+    var showWorkMode by remember { mutableStateOf(false) }
+    var showClear by remember { mutableStateOf(false) }
+    var showUpdates by remember { mutableStateOf(false) }
 
-    val toast: (String) -> Unit = { msg -> Toast.makeText(context, msg, Toast.LENGTH_SHORT).show() }
-
-    LaunchedEffect(Unit) {
-        runCatching {
-            val all = container.transactionRepo.all().first()
-            recordCount = all.size
-            dayCount = all.map { it.date }.distinct().size
-            streak = streakDays(all)
-            runCatching {
-                container.newsRepo.getConfig()?.let { cfg ->
-                    newsSummary = when (cfg.pushFrequency) {
-                        "WEEKLY" -> "每周${"一二三四五六日"[cfg.pushWeekday - 1]} ${cfg.pushHour}:00"
-                        "MONTHLY" -> "每月 ${cfg.pushDay} 日 ${cfg.pushHour}:00"
-                        else -> "每天 ${cfg.pushHour}:00"
-                    }
-                }
-            }
-        }
-    }
-
-    // ---- 备份导入导出 ----
-    val exportLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("application/json")
-    ) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        scope.launch {
-            runCatching {
-                val bytes = container.backupRepo.export(encrypted = true)
-                context.contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
-            }.onSuccess { toast("备份已导出") }
-                .onFailure { toast("导出失败，请重试") }
-        }
-    }
-    val importLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        scope.launch {
-            runCatching {
-                val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                    ?: throw IllegalStateException("读取失败")
-                container.backupRepo.import(bytes)
-            }.onSuccess { toast("导入成功") }
-                .onFailure { toast("导入失败，文件格式不正确") }
-        }
-    }
+    val streak = remember { androidx.compose.runtime.derivedStateOf { 0 } }
 
     Column(modifier = Modifier.fillMaxWidth()) {
-        TabTopBar(
-            title = "我的",
-            actions = {
-                TextButton(onClick = { nav(Routes.UPDATES) }) { Text("更新") }
-            }
-        )
+        TabTopBar(title = "我的")
 
         Column(
             modifier = Modifier
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp)
         ) {
-            // ---- 用户信息卡 ----
-            SjCard(modifier = Modifier.fillMaxWidth()) {
+            // ---- 头像卡 ----
+            SjCard(
+                modifier = Modifier.fillMaxWidth(),
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.05f)
+            ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         modifier = Modifier
-                            .size(62.dp)
-                            .background(
-                                Brush.linearGradient(listOf(Brand500, Color(0xFF2E8DFF))),
-                                CircleShape
-                            ),
+                            .size(56.dp)
+                            .background(Brand100, CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(text = "时", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                        Text("时", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Brand500)
                     }
                     Spacer(Modifier.width(14.dp))
                     Column(modifier = Modifier.weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = settings.userName,
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.clickable { showUserName = true }
-                            )
-                            Spacer(Modifier.width(6.dp))
-                            Text(
-                                text = "✎",
-                                color = TextSecondary,
-                                fontSize = 13.sp,
-                                modifier = Modifier.clickable { showUserName = true }
-                            )
-                        }
-                        Spacer(Modifier.height(6.dp))
-                        Box(
-                            modifier = Modifier
-                                .background(Success100, RoundedCornerShape(999.dp))
-                                .padding(horizontal = 10.dp, vertical = 4.dp)
-                        ) {
-                            Text(
-                                text = "🛡 纯本地数据 · 隐私优先",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = Success500,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
+                        Text(
+                            text = "时笺用户",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = "纯本地运行 · 数据不出机",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary
+                        )
                     }
                 }
-                Spacer(Modifier.height(16.dp))
-                Row {
-                    ProfileStat(dayCount, "记账天数", Modifier.weight(1f))
-                    ProfileStat(recordCount, "记录总数", Modifier.weight(1f))
-                    ProfileStat(streak, "连续打卡", Modifier.weight(1f))
+                Spacer(Modifier.height(14.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    StatPill(
+                        label = "连续打卡",
+                        value = streak.value.toString(),
+                        unit = "天",
+                        bg = Brand100,
+                        fg = Brand600
+                    )
+                    StatPill(
+                        label = "收藏美食",
+                        value = "0",
+                        unit = "家",
+                        bg = Green100,
+                        fg = Green500
+                    )
+                    StatPill(
+                        label = "工作模式",
+                        value = if (settings.workMode) "开" else "关",
+                        unit = "",
+                        bg = Purple100,
+                        fg = Purple500
+                    )
                 }
             }
 
-            // ---- 外观与习惯 ----
-            GroupTitle("外观与习惯")
+            Spacer(Modifier.height(16.dp))
+
+            // ---- 基础设置组 ----
+            GroupTitle("基础")
             SjCard(modifier = Modifier.fillMaxWidth()) {
-                ProfileRow("🌙", Brand100, Brand500, "深色模式", settings.darkMode.label, onClick = { showDarkMode = true })
-                DividerLine()
-                ProfileRow("⏰", Purple100, Purple500, "工作时间", workTimeLabel(settings), onClick = { showWorkTime = true })
-                DividerLine()
-                ProfileRow("📅", Teal100, Teal500, "休息模式", settings.restMode.label, onClick = { showRestMode = true })
-                DividerLine()
-                SwitchRow(
-                    icon = "🔔",
-                    label = "待报销提醒",
-                    subtitle = "有未报销支出时本地通知提醒",
-                    checked = settings.reimburseReminderEnabled,
-                    onCheckedChange = { container.settingsRepo.setReimburseReminder(it) },
-                    iconBackground = Orange100
+                ListRow(
+                    icon = "⏰",
+                    label = "工作时间",
+                    value = workTimeLabel(settings),
+                    onClick = { showWorkTime = true },
+                    iconBackground = Brand100
                 )
-                DividerLine()
-                ProfileRow("📰", Brand100, Brand500, "新闻设置", newsSummary, onClick = { nav(Routes.NEWS_SETTINGS) })
-                DividerLine()
-                ProfileRow("📢", Purple100, Purple500, "更新公告", "v${BuildConfig.VERSION_NAME}", onClick = { nav(Routes.UPDATES) })
+                ListRow(
+                    icon = "🌙",
+                    label = "休息模式",
+                    value = settings.restMode.label,
+                    onClick = { showRestMode = true },
+                    iconBackground = Purple100
+                )
+                ListRow(
+                    icon = "⚡",
+                    label = "专注工作模式",
+                    value = if (settings.workMode) "已开启" else "未开启",
+                    onClick = { showWorkMode = true },
+                    iconBackground = Green100
+                )
             }
 
-            // ---- 美食设置 ----
-            GroupTitle("美食设置")
+            Spacer(Modifier.height(16.dp))
+
+            // ---- 子模块 ----
+            GroupTitle("模块")
             SjCard(modifier = Modifier.fillMaxWidth()) {
-                ProfileRow("❤️", Danger100, Danger500, "收藏管理", "${favs.size} 家", onClick = { nav(Routes.FOOD_LIST.replace("{type}", "favorites")) })
-                DividerLine()
-                ProfileRow("🚫", MaterialTheme.colorScheme.surfaceVariant, TextSecondary, "拉黑管理", "${blocks.size} 家", onClick = { nav(Routes.FOOD_LIST.replace("{type}", "blocked")) })
-                DividerLine()
-                ProfileRow("📍", Brand100, Brand500, "地址管理", "常用地址", onClick = { nav(Routes.ADDRESS_MANAGE) })
-                DividerLine()
-                ProfileRow("🍜", Orange100, Orange500, "美食设置", "高德 Key · 范围", onClick = { nav(Routes.FOOD_SETTINGS) })
+                ListRow(
+                    icon = "🍽️",
+                    label = "美食设置",
+                    value = "搜索中心 / Key / 范围",
+                    onClick = { nav(Routes.FOOD_SETTINGS) },
+                    iconBackground = Brand100
+                )
+                ListRow(
+                    icon = "📰",
+                    label = "新闻设置",
+                    value = when {
+                        settings.newsChannels.size >= 2 -> "${settings.newsChannels.size} 个频道"
+                        settings.newsChannels.size == 1 -> "1 个频道"
+                        else -> "默认频道"
+                    },
+                    onClick = { nav(Routes.NEWS_SETTINGS) },
+                    iconBackground = Purple100
+                )
+                ListRow(
+                    icon = "📍",
+                    label = "地址管理",
+                    value = "家 / 公司 / 常去",
+                    onClick = { nav(Routes.ADDRESS_MANAGE) },
+                    iconBackground = Green100
+                )
+                ListRow(
+                    icon = "📊",
+                    label = "开销统计",
+                    value = "月度收支 / 分类",
+                    onClick = { nav(Routes.STATS) },
+                    iconBackground = MaterialTheme.colorScheme.surfaceVariant
+                )
             }
 
-            // ---- 数据与备份 ----
-            GroupTitle("数据与备份")
+            Spacer(Modifier.height(16.dp))
+
+            GroupTitle("数据")
             SjCard(modifier = Modifier.fillMaxWidth()) {
-                ProfileRow("💾", Brand100, Brand500, "备份与恢复", "导出 · 导入", onClick = { showBackup = true })
-                DividerLine()
-                ProfileRow("📊", Success100, Success500, "数据统计", "月报 · 年报", onClick = { nav(Routes.STATS) })
-                DividerLine()
-                ProfileRow("🗑", MaterialTheme.colorScheme.surfaceVariant, Danger500, "清空数据", null, onClick = { showClear = true }, danger = true)
+                ListRow(
+                    icon = "⭐",
+                    label = "美食收藏",
+                    value = "收藏 / 拉黑",
+                    onClick = { nav(Routes.FOOD_LIST_FAV) },
+                    iconBackground = Brand100
+                )
+                ListRow(
+                    icon = "🔒",
+                    label = "隐私与数据",
+                    value = "权限 / 导出 / 清空",
+                    onClick = { nav(Routes.PRIVACY) },
+                    iconBackground = Purple100
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Danger500.copy(alpha = 0.05f), RoundedCornerShape(13.dp))
+                        .clickable { showClear = true }
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "🗑",
+                            fontSize = 20.sp,
+                            modifier = Modifier
+                                .size(34.dp)
+                                .background(Danger500.copy(alpha = 0.1f), CircleShape)
+                                .padding(6.dp)
+                                .let { Modifier.background(Color.Transparent) }
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "清空全部数据",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = Danger500,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                text = "记账 / 美食 / 设置 · 不可恢复",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Danger500.copy(alpha = 0.75f)
+                            )
+                        }
+                        Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Danger500)
+                    }
+                }
             }
 
-            // ---- 关于 ----
+            Spacer(Modifier.height(16.dp))
+
             GroupTitle("关于")
             SjCard(modifier = Modifier.fillMaxWidth()) {
-                ProfileRow("ℹ️", Purple100, Purple500, "更新与关于", "v${BuildConfig.VERSION_NAME} 手机版", onClick = { nav(Routes.UPDATES) })
-                DividerLine()
-                ProfileRow("🔒", Teal100, Teal500, "隐私说明", "数据不出设备", onClick = { nav(Routes.PRIVACY) })
+                ListRow(
+                    icon = "✨",
+                    label = "更新公告",
+                    value = "v${BuildConfig.VERSION_NAME}",
+                    onClick = { showUpdates = true },
+                    iconBackground = Brand100
+                )
+                ListRow(
+                    icon = "ℹ️",
+                    label = "关于时笺",
+                    value = "版本 / 设计 / 开源",
+                    onClick = { showAbout = true },
+                    iconBackground = Purple100
+                )
+                ListRow(
+                    icon = "💬",
+                    label = "反馈问题",
+                    value = "点我跳转 GitHub",
+                    onClick = {
+                        runCatching {
+                            context.startActivity(
+                                Intent(
+                                    Intent.ACTION_VIEW,
+                                    Uri.parse("https://github.com/hsq6533-jpg/ShiJianApp/issues")
+                                )
+                            )
+                        }
+                    },
+                    iconBackground = Green100
+                )
             }
 
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(24.dp))
             Text(
                 text = "时笺手机版 · 纯本地运行",
                 style = MaterialTheme.typography.bodySmall,
@@ -287,75 +326,18 @@ fun ProfileScreen(
                 modifier = Modifier.fillMaxWidth(),
                 textAlign = TextAlign.Center
             )
-            Spacer(Modifier.height(8.dp))
+            Text(
+                text = "v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+                style = MaterialTheme.typography.labelSmall,
+                color = TextSecondary,
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = TextAlign.Center
+            )
+            Spacer(Modifier.height(20.dp))
         }
     }
 
-    if (showBackup) {
-        BackupSheet(
-            onDismiss = { showBackup = false },
-            onExport = {
-                val now = java.util.Date()
-                val fname = "shijian-backup-" + DateTimeFormatter.ofPattern("yyyyMMdd-HHmm").format(
-                    now.toInstant().atZone(java.time.ZoneId.systemDefault())
-                ) + ".json"
-                exportLauncher.launch(fname)
-                showBackup = false
-            },
-            onImport = {
-                importLauncher.launch(arrayOf("application/json", "text/plain", "text/*"))
-                showBackup = false
-            },
-            onCopy = {
-                scope.launch {
-                    runCatching {
-                        val bytes = container.backupRepo.export(encrypted = true)
-                        val base64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
-                        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        cm.setPrimaryClip(ClipData.newPlainText("shijian-backup", base64))
-                    }.onSuccess { toast("已复制，请粘贴保存到文本文件") }
-                        .onFailure { toast("复制失败，请改用导出文件") }
-                }
-            }
-        )
-    }
-
-    if (showClear) {
-        AlertDialog(
-            onDismissRequest = { showClear = false },
-            title = { Text("清空全部数据？") },
-            text = { Text("将删除所有账单、美食收藏、地址与新闻记录，此操作不可恢复。") },
-            confirmButton = {
-                TextButton(onClick = {
-                    showClear = false
-                    scope.launch {
-                        runCatching {
-                            container.database.transactionDao().clearAll()
-                            container.database.foodPoiDao().clearAll()
-                            container.addressRepo.clearAll()
-                            container.database.newsDao().clearAll()
-                        }.onSuccess { toast("本地数据已清空") }
-                            .onFailure { toast("清空失败，请重试") }
-                    }
-                }) { Text("清空", color = Danger500) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showClear = false }) { Text("取消") }
-            }
-        )
-    }
-
-    if (showUserName) {
-        EditNameDialog(
-            current = settings.userName,
-            onDismiss = { showUserName = false },
-            onSave = { name ->
-                container.settingsRepo.setUserName(name)
-                showUserName = false
-            }
-        )
-    }
-
+    // ---- Sheet / Dialog ----
     if (showWorkTime) {
         WorkTimeSheet(
             currentStart = settings.workStartHour * 60 + settings.workStartMinute,
@@ -382,208 +364,163 @@ fun ProfileScreen(
         )
     }
 
-    if (showDarkMode) {
-        OptionSheet(
-            title = "深色模式",
-            options = DarkMode.entries.map { it.label },
-            selected = settings.darkMode.label,
-            onDismiss = { showDarkMode = false },
-            onSelect = { label ->
-                DarkMode.entries.firstOrNull { it.label == label }?.let { container.settingsRepo.setDarkMode(it) }
-                showDarkMode = false
+    if (showWorkMode) {
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(onDismissRequest = { showWorkMode = false }, sheetState = sheetState) {
+            Column(modifier = Modifier.padding(horizontal = 20.dp).padding(bottom = 32.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("工作模式", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "开启后首页自动隐藏开销 / 美食 / 新闻入口",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary
+                        )
+                    }
+                    WorkModeBadge(workMode = settings.workMode)
+                }
+                Spacer(Modifier.height(16.dp))
+                SjPrimaryButtonSmall(
+                    text = if (settings.workMode) "关闭工作模式" else "开启工作模式",
+                    primary = !settings.workMode,
+                    onClick = {
+                        scope.launch { container.settingsRepo.setWorkMode(!settings.workMode) }
+                        showWorkMode = false
+                    }
+                )
+            }
+        }
+    }
+
+    if (showUpdates) {
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(onDismissRequest = { showUpdates = false }, sheetState = sheetState) {
+            Column(
+                modifier = Modifier
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 28.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                Text(
+                    text = "更新公告",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = "v${BuildConfig.VERSION_NAME} 版本更新",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary
+                )
+                Spacer(Modifier.height(14.dp))
+                UpdatesData.ITEMS.forEach { item ->
+                    if (item.versionCode <= BuildConfig.VERSION_CODE) {
+                        UpdatesRow(item)
+                        Spacer(Modifier.height(10.dp))
+                    }
+                }
+            }
+        }
+    }
+
+    if (showAbout) {
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(onDismissRequest = { showAbout = false }, sheetState = sheetState) {
+            Column(modifier = Modifier.padding(horizontal = 20.dp).padding(bottom = 28.dp)) {
+                Text("关于时笺", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = "v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary
+                )
+                Spacer(Modifier.height(14.dp))
+                AboutPill(title = "一句话介绍", desc = "纯本地运行的手机轻效率工具")
+                Spacer(Modifier.height(10.dp))
+                AboutPill(title = "数据存储", desc = "所有数据保存在本机 Room / DataStore，不联网上传")
+                Spacer(Modifier.height(10.dp))
+                AboutPill(
+                    title = "联网能力",
+                    desc = "仅用于美食（高德）、新闻（配置的 RSS 源）、更新公告（GitHub）"
+                )
+                Spacer(Modifier.height(18.dp))
+                SjPrimaryButtonSmall(
+                    text = "查看源码 (GitHub)",
+                    primary = true,
+                    onClick = {
+                        runCatching {
+                            context.startActivity(
+                                Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/hsq6533-jpg/ShiJianApp"))
+                            )
+                        }
+                    }
+                )
+            }
+        }
+    }
+
+    if (showClear) {
+        AlertDialog(
+            onDismissRequest = { showClear = false },
+            title = { Text("清空全部数据？") },
+            text = {
+                Text("将删除本机所有记账 / 美食缓存 / 设置；此操作不可恢复。")
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    scope.launch {
+                        runCatching {
+                            container.database.clearAllTables()
+                            container.settingsRepo.resetAll()
+                        }
+                    }
+                    showClear = false
+                }) { Text("确认清空", color = Danger500) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClear = false }) { Text("取消") }
             }
         )
     }
 }
 
-// ==================== 小组件 ====================
-
-private fun workTimeLabel(s: com.shijian.app.data.prefs.AppSettings): String {
+private fun workTimeLabel(s: AppSettings): String {
     val pad = { v: Int -> String.format("%02d", v) }
     return "${pad(s.workStartHour)}:${pad(s.workStartMinute)}–${pad(s.workEndHour)}:${pad(s.workEndMinute)}"
 }
 
-/** 连续打卡：今天有记录则从今天起算，否则从昨天起算（今天尚未结束时仍算连续） */
-private fun streakDays(all: List<TransactionEntity>): Int {
-    val recorded = all.map { it.date }.toSet()
-    if (recorded.isEmpty()) return 0
-    var day = LocalDate.parse(DateUtils.today())
-    if (!recorded.contains(DateUtils.ymd(day))) {
-        day = day.minusDays(1)
-    }
-    var streak = 0
-    while (recorded.contains(DateUtils.ymd(day))) {
-        streak++
-        day = day.minusDays(1)
-    }
-    return streak
-}
-
 @Composable
-private fun ProfileStat(value: Int, label: String, modifier: Modifier = Modifier) {
-    Column(
-        modifier = modifier,
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(
-            text = value.toString(),
-            style = MaterialTheme.typography.titleLarge.copy(fontFeatureSettings = "tnum"),
-            fontWeight = FontWeight.Bold
-        )
-        Spacer(Modifier.height(2.dp))
-        Text(text = label, style = MaterialTheme.typography.labelSmall, color = TextSecondary)
-    }
-}
-
-@Composable
-private fun GroupTitle(text: String) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.labelMedium,
-        fontWeight = FontWeight.SemiBold,
-        color = TextSecondary,
-        modifier = Modifier.padding(start = 4.dp, top = 18.dp, bottom = 8.dp)
-    )
-}
-
-@Composable
-private fun DividerLine() {
+private fun StatPill(label: String, value: String, unit: String, bg: Color, fg: Color) {
     Box(
         modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = 44.dp)
-            .height(0.5.dp)
-            .background(MaterialTheme.colorScheme.outlineVariant)
-    )
-}
-
-@Composable
-private fun ProfileRow(
-    icon: String,
-    iconBackground: Color,
-    iconColor: Color,
-    label: String,
-    value: String?,
-    onClick: () -> Unit,
-    danger: Boolean = false
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .size(32.dp)
-                .background(iconBackground, RoundedCornerShape(9.dp)),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(text = icon, fontSize = 15.sp)
-        }
-        Spacer(Modifier.width(12.dp))
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyLarge,
-            color = if (danger) Danger500 else MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.weight(1f)
-        )
-        if (value != null) {
-            Text(text = value, style = MaterialTheme.typography.bodySmall, color = TextSecondary)
-        }
-        Spacer(Modifier.width(4.dp))
-        Text(text = "›", color = MaterialTheme.colorScheme.outline, fontSize = 20.sp)
-    }
-}
-
-// ==================== 弹窗 ====================
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun BackupSheet(
-    onDismiss: () -> Unit,
-    onExport: () -> Unit,
-    onImport: () -> Unit,
-    onCopy: () -> Unit
-) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
-        Column(modifier = Modifier.padding(horizontal = 20.dp).padding(bottom = 28.dp)) {
-            Text(
-                text = "备份与恢复",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold
-            )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = "所有数据仅保存在本机。建议定期导出备份：换机、卸载或恢复出厂前请先导出，之后可通过导入一键还原。备份文件已加密。",
-                style = MaterialTheme.typography.bodySmall,
-                color = TextSecondary,
-                lineHeight = 20.sp
-            )
-            Spacer(Modifier.height(18.dp))
-            SjPrimaryButtonSmall(text = "导出备份文件", onClick = onExport, primary = true)
-            Spacer(Modifier.height(10.dp))
-            SjPrimaryButtonSmall(text = "从文件导入", onClick = onImport, primary = false)
-            Spacer(Modifier.height(8.dp))
-            TextButton(onClick = onCopy, modifier = Modifier.align(Alignment.CenterHorizontally)) {
-                Text("复制备份内容（手动保存）", color = Brand500)
-            }
-            Spacer(Modifier.height(6.dp))
-            TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.CenterHorizontally)) {
-                Text("完成")
-            }
-        }
-    }
-}
-
-@Composable
-private fun SjPrimaryButtonSmall(text: String, onClick: () -> Unit, primary: Boolean) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(48.dp)
-            .background(
-                if (primary) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                RoundedCornerShape(13.dp)
-            )
-            .clickable(onClick = onClick),
+            .weight(1f)
+            .background(bg, RoundedCornerShape(13.dp))
+            .padding(vertical = 12.dp, horizontal = 10.dp),
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.labelLarge,
-            color = if (primary) Color.White else MaterialTheme.colorScheme.onSurface
-        )
-    }
-}
-
-@Composable
-private fun EditNameDialog(
-    current: String,
-    onDismiss: () -> Unit,
-    onSave: (String) -> Unit
-) {
-    var name by remember { mutableStateOf(current) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("修改昵称") },
-        text = {
-            androidx.compose.material3.OutlinedTextField(
-                value = name,
-                onValueChange = { name = it.take(12) },
-                singleLine = true,
-                label = { Text("昵称") }
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = value,
+                    color = fg,
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontSize = 20.sp
+                )
+                if (unit.isNotBlank()) {
+                    Spacer(Modifier.width(2.dp))
+                    Text(text = unit, style = MaterialTheme.typography.labelSmall, color = fg)
+                }
+            }
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = TextSecondary
             )
-        },
-        confirmButton = {
-            TextButton(onClick = { onSave(name.trim().ifEmpty { "时笺用户" }) }) { Text("保存") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
         }
-    )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -595,9 +532,13 @@ private fun WorkTimeSheet(
     onSave: (Int, Int) -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var start by remember { mutableIntStateOf(currentStart) }
-    var end by remember { mutableIntStateOf(currentEnd) }
-    val hh = { m: Int -> String.format("%02d", m / 60) }
+    // 以 30 分钟为步长：一天 24h × 2 = 48 格
+    var startIdx by remember { mutableIntStateOf(((currentStart / 30).coerceIn(0, 47))) }
+    var endIdx by remember { mutableIntStateOf(((currentEnd / 30).coerceIn(0, 47))) }
+    val hhmm = { idx: Int ->
+        val mins = (idx * 30).coerceIn(0, 24 * 60 - 30)
+        String.format("%02d:%02d", mins / 60, mins % 60)
+    }
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(modifier = Modifier.padding(horizontal = 20.dp).padding(bottom = 28.dp)) {
             Text(
@@ -607,7 +548,7 @@ private fun WorkTimeSheet(
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                text = "用于首页下班倒计时",
+                text = "用于首页下班倒计时 · 步长 30 分钟",
                 style = MaterialTheme.typography.bodySmall,
                 color = TextSecondary
             )
@@ -615,26 +556,40 @@ private fun WorkTimeSheet(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("上班", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
                 Text(
-                    text = "${hh(start)}:00",
+                    text = hhmm(startIdx),
                     color = Brand500,
                     fontWeight = FontWeight.Bold,
-                    style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = "tnum")
+                    style = MaterialTheme.typography.bodyMedium
                 )
             }
-            Slider(value = (start / 60).toFloat(), onValueChange = { start = it.toInt() * 60 }, valueRange = 0f..23f)
-            Spacer(Modifier.height(6.dp))
+            Slider(
+                value = startIdx.toFloat(),
+                onValueChange = { startIdx = it.toInt() },
+                valueRange = 0f..47f,
+                steps = 46
+            )
+            Spacer(Modifier.height(10.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("下班", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
                 Text(
-                    text = "${hh(end)}:00",
+                    text = hhmm(endIdx),
                     color = Brand500,
                     fontWeight = FontWeight.Bold,
-                    style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = "tnum")
+                    style = MaterialTheme.typography.bodyMedium
                 )
             }
-            Slider(value = (end / 60).toFloat(), onValueChange = { end = it.toInt() * 60 }, valueRange = 0f..23f)
+            Slider(
+                value = endIdx.toFloat(),
+                onValueChange = { endIdx = it.toInt() },
+                valueRange = 0f..47f,
+                steps = 46
+            )
             Spacer(Modifier.height(18.dp))
-            SjPrimaryButtonSmall(text = "完成", onClick = { onSave(start, end) }, primary = true)
+            SjPrimaryButtonSmall(
+                text = "完成",
+                onClick = { onSave(startIdx * 30, endIdx * 30) },
+                primary = true
+            )
         }
     }
 }
@@ -656,29 +611,109 @@ private fun OptionSheet(
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold
             )
-            Spacer(Modifier.height(12.dp))
-            options.forEach { opt ->
-                val sel = opt == selected
+            Spacer(Modifier.height(16.dp))
+            options.forEach { option ->
+                val sel = option == selected
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(
-                            if (sel) Brand100 else MaterialTheme.colorScheme.surfaceVariant,
+                            if (sel) MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
+                            else MaterialTheme.colorScheme.surface,
                             RoundedCornerShape(12.dp)
                         )
-                        .clickable { onSelect(opt) }
-                        .padding(vertical = 13.dp),
-                    contentAlignment = Alignment.Center
+                        .clickable { onSelect(option) }
+                        .padding(horizontal = 14.dp, vertical = 13.dp),
                 ) {
-                    Text(
-                        text = if (sel) "✓  $opt" else opt,
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = if (sel) Brand500 else MaterialTheme.colorScheme.onSurface,
-                        fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = option,
+                            style = MaterialTheme.typography.bodyLarge,
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (sel) Text("✓", color = Brand500, fontWeight = FontWeight.Bold)
+                    }
                 }
                 Spacer(Modifier.height(8.dp))
             }
         }
     }
 }
+
+@Composable
+private fun UpdatesRow(item: UpdatesData.UpdateItem) {
+    SjCard(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+    ) {
+        Row(verticalAlignment = Alignment.Top) {
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .background(Brand100, RoundedCornerShape(9.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(item.emoji, fontSize = 16.sp)
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = item.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = item.version,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Brand500
+                    )
+                }
+                if (item.desc.isNotBlank()) {
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = item.desc,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondary
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AboutPill(title: String, desc: String) {
+    SjCard(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.labelSmall,
+            color = Brand500,
+            fontWeight = FontWeight.SemiBold
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = desc,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onBackground
+        )
+    }
+}
+
+@Composable
+private fun GroupTitle(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelMedium,
+        fontWeight = FontWeight.SemiBold,
+        color = TextSecondary,
+        modifier = Modifier.padding(start = 4.dp, top = 18.dp, bottom = 8.dp)
+    )
+}
+
+private val Routes.Companion.FOOD_LIST_FAV get() = "food_list?type=favorites"

@@ -69,3 +69,33 @@ jobs:
           name: shijian-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           retention-days: 90
+
+      - name: Publish APK to Catbox.moe (public direct link, no login needed)
+        shell: bash
+        run: |
+          APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
+          if [ ! -f "$APK_PATH" ]; then
+            echo "::error::APK not found at $APK_PATH"
+            exit 1
+          fi
+          echo "Uploading $APK_PATH to catbox.moe ..."
+          RESP=$(curl -s -S -F "reqtype=fileupload" -F "fileToUpload=@$APK_PATH" https://catbox.moe/user/api.php)
+          echo "catbox response: $RESP"
+          if echo "$RESP" | grep -qE "^https?://"; then
+            echo "::notice title=APK 公开直链(无需登录)::${RESP}"
+            # 同时写进 warning，确保在 Annotations 列表顶部可见
+            SAFE=$(printf '%s' "$RESP" | sed 's/%/%25/g; s/\r/%0D/g; s/\n/%0A/g')
+            echo "::warning title=📦 APK 下载直链(点不开就复制到浏览器)::${SAFE}"
+          else
+            echo "::warning::catbox 上传失败，响应: $RESP"
+            echo "尝试 0x0.st 兜底..."
+            RESP2=$(curl -s -S -F "file=@$APK_PATH" https://0x0.st) || true
+            echo "0x0.st response: $RESP2"
+            if echo "$RESP2" | grep -qE "^https?://"; then
+              SAFE=$(printf '%s' "$RESP2" | sed 's/%/%25/g; s/\r/%0D/g; s/\n/%0A/g')
+              echo "::warning title=📦 APK 下载直链(0x0.st 兜底)::${SAFE}"
+            else
+              echo "::warning::0x0.st 也失败: $RESP2"
+              echo "::notice::两种公开托管均不可用，请登录 GitHub 从 Artifacts 下载"
+            fi
+          fi

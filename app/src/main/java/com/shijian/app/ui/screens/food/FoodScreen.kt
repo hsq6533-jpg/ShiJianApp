@@ -69,9 +69,12 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.shijian.app.AppContainer
+import com.shijian.app.data.db.entity.AppSettings
 import com.shijian.app.data.db.entity.FoodPoiEntity
 import com.shijian.app.data.db.entity.SearchAddressEntity
 import com.shijian.app.data.repo.FoodRepository
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.map
 import com.shijian.app.ui.components.EmptyState
 import com.shijian.app.ui.components.SjCard
 import com.shijian.app.ui.components.TabTopBar
@@ -105,11 +108,26 @@ fun FoodScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current
-    val settings by container.settingsRepo.settings.collectAsStateWithLifecycle()
-    val addresses by container.addressRepo.observeAll().collectAsStateWithLifecycle(initialValue = emptyList())
-    val results by container.foodRepo.results.collectAsStateWithLifecycle()
-    val searching by container.foodRepo.searching.collectAsStateWithLifecycle()
-    val error by container.foodRepo.error.collectAsStateWithLifecycle()
+    val settings by remember {
+        container.settingsRepo.settings
+            .catch { emit(AppSettings()) }
+    }.collectAsStateWithLifecycle(initialValue = AppSettings())
+    val addresses by remember {
+        container.addressRepo.observeAll()
+            .catch { emit(emptyList()) }
+    }.collectAsStateWithLifecycle(initialValue = emptyList())
+    val results by remember {
+        container.foodRepo.results
+            .catch { emit(emptyList()) }
+    }.collectAsStateWithLifecycle(initialValue = emptyList())
+    val searching by remember {
+        container.foodRepo.searching
+            .catch { emit(false) }
+    }.collectAsStateWithLifecycle(initialValue = false)
+    val error by remember {
+        container.foodRepo.error
+            .catch { emit(null) }
+    }.collectAsStateWithLifecycle(initialValue = null)
 
     // ---- 状态 ----
     var amapKey by remember { mutableStateOf(container.securePrefs.getAmapKey()) }
@@ -133,21 +151,25 @@ fun FoodScreen(
 
     // 首次进入：默认地址作为搜索中心
     LaunchedEffect(Unit) {
-        val def = container.addressRepo.getDefault()
-        if (def != null) {
-            center = def.toCenter()
+        runCatching {
+            val def = container.addressRepo.getDefault()
+            if (def != null) {
+                center = def.toCenter()
+            }
         }
     }
 
-    // 随机推荐：进入页面自动挑一个
+    // 随机推荐：进入页面自动挑一个（任何异常都不崩）
     val pick: () -> Unit = {
         picking = true
         scope.launch {
-            picked = container.foodRepo.randomPick()
+            runCatching {
+                picked = container.foodRepo.randomPick()
+            }
             picking = false
         }
     }
-    LaunchedEffect(Unit) { pick() }
+    LaunchedEffect(Unit) { runCatching { pick() } }
 
     val toast: (String) -> Unit = { msg -> Toast.makeText(context, msg, Toast.LENGTH_SHORT).show() }
 

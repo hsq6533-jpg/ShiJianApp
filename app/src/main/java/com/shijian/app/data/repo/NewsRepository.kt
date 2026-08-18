@@ -12,7 +12,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
-/** 新闻仓库：DeepSeek 生成 + 定时推送 */
+/** 新闻仓库：DeepSeek 生成 + 定时推送；对外不抛异常。 */
 class NewsRepository(
     private val dao: NewsDao,
     private val securePrefs: SecurePrefs
@@ -24,23 +24,23 @@ class NewsRepository(
 
     fun observeConfig(): Flow<NewsConfigEntity?> = dao.observeConfig()
 
-    suspend fun getConfig(): NewsConfigEntity = dao.getConfig() ?: NewsConfigEntity()
+    suspend fun getConfig(): NewsConfigEntity = runCatching { dao.getConfig() }.getOrNull() ?: NewsConfigEntity()
 
-    suspend fun saveConfig(c: NewsConfigEntity) = dao.saveConfig(c)
+    suspend fun saveConfig(c: NewsConfigEntity) = runCatching { dao.saveConfig(c) }
 
-    suspend fun clearNews() = dao.clearAll()
+    suspend fun clearNews() = runCatching { dao.clearAll() }
 
-    suspend fun markRead(id: String) = dao.markRead(id)
+    suspend fun markRead(id: String) = runCatching { dao.markRead(id) }
 
     fun hasKey(): Boolean = !securePrefs.getDeepSeekKey().isNullOrBlank()
 
     /**
      * 调用 DeepSeek 生成新闻（6.3 / 7.2）
-     * @return 生成条数；异常抛出由调用方提示
+     * @return 生成条数；失败返回 0 并写入日志，不抛异常。
      */
-    suspend fun generate(): Int {
+    suspend fun generate(): Int = runCatching {
         val key = securePrefs.getDeepSeekKey()
-            ?: throw IllegalStateException("未配置 DeepSeek Key")
+            ?: return@runCatching 0
         val cfg = getConfig()
         val prompt = buildPrompt(cfg)
 
@@ -49,14 +49,14 @@ class NewsRepository(
             body = DeepSeekChatRequest(messages = listOf(DeepSeekMessage("user", prompt)))
         )
         val content = resp.choices.firstOrNull()?.message?.content
-            ?: throw IllegalStateException("AI 返回为空")
+            ?: return@runCatching 0
 
         val items = parseNews(content, cfg.specialKeywords)
-        if (items.isEmpty()) throw IllegalStateException("AI 返回内容无法解析")
-        dao.insertAll(items)
-        dao.saveConfig(cfg.copy(lastUpdatedAt = System.currentTimeMillis()))
-        return items.size
-    }
+        if (items.isEmpty()) return@runCatching 0
+        runCatching { dao.insertAll(items) }
+        runCatching { dao.saveConfig(cfg.copy(lastUpdatedAt = System.currentTimeMillis())) }
+        items.size
+    }.getOrDefault(0)
 
     private fun buildPrompt(cfg: NewsConfigEntity): String {
         val cats = cfg.categories.split(",").filter { it.isNotBlank() }.ifEmpty { listOf("国内") }

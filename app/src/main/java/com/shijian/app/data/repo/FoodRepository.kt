@@ -4,55 +4,51 @@ import com.shijian.app.api.AmapPoi
 import com.shijian.app.api.ApiClient
 import com.shijian.app.data.db.dao.FoodPoiDao
 import com.shijian.app.data.db.entity.FoodPoiEntity
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.withContext
 import kotlin.math.cos
 
-/** 美食仓库：本地缓存 + 高德多点位搜索 */
+/** 美食仓库：本地缓存 + 高德多点位搜索；所有挂起方法保证不抛异常（失败写入 _error） */
 class FoodRepository(private val dao: FoodPoiDao) {
 
     private val _results = MutableStateFlow<List<FoodPoiEntity>>(emptyList())
-    /** 当前搜索结果（已过滤黑名单） */
     val results: StateFlow<List<FoodPoiEntity>> = _results
 
-    /** 是否正在搜索 */
     private val _searching = MutableStateFlow(false)
     val searching: StateFlow<Boolean> = _searching
 
-    /** 最后一次搜索失败信息 */
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error
 
     fun observeActive(): Flow<List<FoodPoiEntity>> = dao.observeActive()
-
     fun observeFavorites(): Flow<List<FoodPoiEntity>> = dao.observeFavorites()
-
     fun observeBlacklisted(): Flow<List<FoodPoiEntity>> = dao.observeBlacklisted()
-
     fun observeAll(): Flow<List<FoodPoiEntity>> = dao.observeAll()
-
     fun searchLocalFlow(kw: String): Flow<List<FoodPoiEntity>> = dao.searchLocal(kw)
 
-    suspend fun toggleFavorite(poi: FoodPoiEntity) = dao.upsert(poi.copy(isFavorite = !poi.isFavorite))
+    suspend fun toggleFavorite(poi: FoodPoiEntity) = runCatching {
+        dao.upsert(poi.copy(isFavorite = !poi.isFavorite))
+    }
 
-    suspend fun setBlacklisted(poi: FoodPoiEntity, blacklisted: Boolean) =
+    suspend fun setBlacklisted(poi: FoodPoiEntity, blacklisted: Boolean) = runCatching {
         dao.upsert(poi.copy(isBlacklisted = blacklisted))
+    }
 
-    suspend fun clearCache() {
+    suspend fun clearCache() = runCatching {
         dao.clearAll()
         _results.value = emptyList()
     }
 
-    /** 随机推荐：优先收藏，其次未拉黑缓存 */
-    suspend fun randomPick(): FoodPoiEntity? =
-        dao.randomFavorite() ?: dao.randomActive()
+    /** 随机推荐：优先收藏，其次未拉黑缓存；任何异常不向上抛（返回 null） */
+    suspend fun randomPick(): FoodPoiEntity? = withContext(Dispatchers.IO) {
+        runCatching { dao.randomFavorite() ?: dao.randomActive() }.getOrNull()
+    }
 
-    /**
-     * 周边搜索（7.1）
-     * @return 命中缓存返回 false，走网络并落库返回 true；失败抛异常
-     */
+    /** 周边搜索（7.1）。任何异常捕获并写入 error，不抛。 */
     suspend fun searchAround(
         amapKey: String,
         lat: Double,
@@ -61,22 +57,22 @@ class FoodRepository(private val dao: FoodPoiDao) {
         keywords: String?,
         foodType: String?,
         multiPoint: Boolean
-    ): Boolean {
+    ): Boolean = withContext(Dispatchers.IO) {
         _searching.value = true
         _error.value = null
         try {
             val centerKey = "${lng},${lat}|${radiusKm}"
             val freshBefore = System.currentTimeMillis() - CACHE_TTL
-            val cachedCount = dao.cachedCount(centerKey, freshBefore)
+            val cachedCount = runCatching { dao.cachedCount(centerKey, freshBefore) }.getOrDefault(0)
             if (cachedCount > 0) {
-                val cached = dao.observeCached(centerKey, freshBefore)
-                cached.firstOrNull()?.let {
-                    _results.value = it.filter { p -> !p.isBlacklisted }
+                val cached = dao.observeCached(centerKey, freshBefore).firstOrNull()
+                if (!cached.isNullOrEmpty()) {
+                    _results.value = cached.filter { p -> !p.isBlacklisted }
+                    return@withContext false
                 }
-                return false
             }
 
-            val types = foodType?.let { FOOD_TYPES[it] } ?: FOOD_TYPES[foodType] ?: "050000"
+            val types = FOOD_TYPES[foodType] ?: FOOD_TYPES["全部"] ?: "050000"
             val raw = mutableListOf<AmapPoi>()
             val seen = HashSet<String>()
 
@@ -86,7 +82,7 @@ class FoodRepository(private val dao: FoodPoiDao) {
                     radiusKm <= 5 -> 5
                     else -> 7
                 }
-                val points = samplePoints(lat, lng, radiusKm, n)
+                val points = runCatching { samplePoints(lat, lng, radiusKm, n) }.getOrDefault(listOf(lat to lng))
                 var calls = 0
                 for ((plat, plng) in points) {
                     var page = 1
@@ -100,7 +96,11 @@ class FoodRepository(private val dao: FoodPoiDao) {
                             page = page
                         )
                         calls++
-                        if (resp.status != "1" || resp.pois.isEmpty()) break
+                        if (resp.status != "1") {
+                            _error.value = resp.info.ifBlank { "高德返回错误：${resp.status}" }
+                            break
+                        }
+                        if (resp.pois.isEmpty()) break
                         resp.pois.forEach { p -> if (seen.add(p.id)) raw.add(p) }
                         page++
                     }
@@ -116,57 +116,69 @@ class FoodRepository(private val dao: FoodPoiDao) {
                         types = types,
                         page = page
                     )
-                    if (resp.status != "1" || resp.pois.isEmpty()) break
+                    if (resp.status != "1") {
+                        _error.value = resp.info.ifBlank { "高德返回错误：${resp.status}" }
+                        break
+                    }
+                    if (resp.pois.isEmpty()) break
                     resp.pois.forEach { p -> if (seen.add(p.id)) raw.add(p) }
                     page++
                 }
             }
 
             val now = System.currentTimeMillis()
-            val entities = raw.map { it.toEntity(centerKey, now) }
-            dao.upsertAll(entities)
+            val entities = raw.mapNotNull { it.toEntityOrNull(centerKey, now) }
+            runCatching { dao.upsertAll(entities) }
             _results.value = entities.filter { !it.isBlacklisted }
-            return true
-        } finally {
-            _searching.value = false
-        }
-    }
-
-    /** 关键词搜索（place/text） */
-    suspend fun searchByKeyword(amapKey: String, keyword: String, city: String?) {
-        _searching.value = true
-        _error.value = null
-        try {
-            val centerKey = "kw:$keyword|${city ?: ""}"
-            val freshBefore = System.currentTimeMillis() - CACHE_TTL
-            if (dao.cachedCount(centerKey, freshBefore) > 0) {
-                val cached = dao.observeCached(centerKey, freshBefore)
-                cached.firstOrNull()?.let {
-                    _results.value = it.filter { p -> !p.isBlacklisted }
-                }
-                return
-            }
-            val raw = mutableListOf<AmapPoi>()
-            val seen = HashSet<String>()
-            var page = 1
-            while (page <= MAX_PAGES_PER_POINT) {
-                val resp = ApiClient.amap.text(amapKey, keyword, city, page = page)
-                if (resp.status != "1" || resp.pois.isEmpty()) break
-                resp.pois.forEach { p -> if (seen.add(p.id)) raw.add(p) }
-                page++
-            }
-            val now = System.currentTimeMillis()
-            val entities = raw.map { it.toEntity(centerKey, now) }
-            dao.upsertAll(entities)
-            _results.value = entities.filter { !it.isBlacklisted }
+            true
         } catch (e: Exception) {
-            _error.value = "搜索失败，请检查 Key 或网络"
+            _error.value = "搜索失败：${e.message ?: "网络或 Key 异常"}"
+            false
         } finally {
             _searching.value = false
         }
     }
 
-    /** 按地址搜索：先地理编码，再周边搜索 */
+    suspend fun searchByKeyword(amapKey: String, keyword: String, city: String?) {
+        withContext(Dispatchers.IO) {
+            _searching.value = true
+            _error.value = null
+            try {
+                if (keyword.isBlank()) { _results.value = emptyList(); return@withContext }
+                val centerKey = "kw:$keyword|${city ?: ""}"
+                val freshBefore = System.currentTimeMillis() - CACHE_TTL
+                if (runCatching { dao.cachedCount(centerKey, freshBefore) }.getOrDefault(0) > 0) {
+                    val cached = dao.observeCached(centerKey, freshBefore).firstOrNull()
+                    if (!cached.isNullOrEmpty()) {
+                        _results.value = cached.filter { p -> !p.isBlacklisted }
+                        return@withContext
+                    }
+                }
+                val raw = mutableListOf<AmapPoi>()
+                val seen = HashSet<String>()
+                var page = 1
+                while (page <= MAX_PAGES_PER_POINT) {
+                    val resp = ApiClient.amap.text(amapKey, keyword, city, page = page)
+                    if (resp.status != "1") {
+                        _error.value = resp.info.ifBlank { "高德返回错误：${resp.status}" }
+                        break
+                    }
+                    if (resp.pois.isEmpty()) break
+                    resp.pois.forEach { p -> if (seen.add(p.id)) raw.add(p) }
+                    page++
+                }
+                val now = System.currentTimeMillis()
+                val entities = raw.mapNotNull { it.toEntityOrNull(centerKey, now) }
+                runCatching { dao.upsertAll(entities) }
+                _results.value = entities.filter { !it.isBlacklisted }
+            } catch (e: Exception) {
+                _error.value = "搜索失败：${e.message ?: "网络或 Key 异常"}"
+            } finally {
+                _searching.value = false
+            }
+        }
+    }
+
     suspend fun searchByAddress(
         amapKey: String,
         address: String,
@@ -174,17 +186,28 @@ class FoodRepository(private val dao: FoodPoiDao) {
         radiusKm: Int,
         multiPoint: Boolean
     ) {
-        val resp = ApiClient.amap.geocode(amapKey, address, city)
-        val loc = resp.geocodes.firstOrNull()?.location ?: throw IllegalStateException("地址解析失败")
-        val parts = loc.split(",")
-        if (parts.size != 2) throw IllegalStateException("地址解析失败")
-        searchAround(amapKey, parts[1].toDouble(), parts[0].toDouble(), radiusKm, null, null, multiPoint)
+        withContext(Dispatchers.IO) {
+            _searching.value = true
+            _error.value = null
+            try {
+                val resp = runCatching { ApiClient.amap.geocode(amapKey, address, city) }
+                    .getOrElse { throw IllegalStateException("地址解析失败：${it.message}") }
+                val loc = resp.geocodes.firstOrNull()?.location
+                    ?: throw IllegalStateException("未解析到地址坐标")
+                val parts = loc.split(",")
+                if (parts.size != 2) throw IllegalStateException("坐标格式异常")
+                searchAround(amapKey, parts[1].toDouble(), parts[0].toDouble(), radiusKm, null, null, multiPoint)
+            } catch (e: Exception) {
+                _error.value = "地址搜索失败：${e.message ?: "地址或 Key 异常"}"
+                _searching.value = false
+            }
+        }
     }
 
     private fun samplePoints(lat: Double, lng: Double, radiusKm: Int, n: Int): List<Pair<Double, Double>> {
         val kmPerDegLat = 111.32
         val kmPerDegLng = 111.32 * cos(Math.toRadians(lat)).coerceAtLeast(0.01)
-        val spacing = 2.0 * radiusKm / (n - 1)
+        val spacing = 2.0 * radiusKm.coerceAtLeast(1) / (n - 1).coerceAtLeast(1)
         val points = mutableListOf<Pair<Double, Double>>()
         for (i in 0 until n) {
             for (j in 0 until n) {
@@ -196,31 +219,36 @@ class FoodRepository(private val dao: FoodPoiDao) {
         return points
     }
 
-    private fun AmapPoi.toEntity(centerKey: String, now: Long): FoodPoiEntity {
+    /** toEntity 容错版：任何字段为空/格式错误均返回 null，不丢入结果集。 */
+    private fun AmapPoi.toEntityOrNull(centerKey: String, now: Long): FoodPoiEntity? = runCatching {
+        if (id.isBlank() && name.isBlank()) return@runCatching null
         val parts = location.split(",")
-        return FoodPoiEntity(
-            id = id.ifBlank { name + location },
+        FoodPoiEntity(
+            id = id.ifBlank { "${name}_${address}_${location}" },
             name = name,
-            type = type.substringAfter(';').ifBlank { type },
+            type = when {
+                type.contains(';') -> type.substringAfter(';')
+                type.isNotBlank() -> type
+                else -> "美食"
+            },
             address = address,
             longitude = parts.getOrNull(0)?.toDoubleOrNull() ?: 0.0,
             latitude = parts.getOrNull(1)?.toDoubleOrNull() ?: 0.0,
             distance = distance ?: 0,
             rating = rating,
             cost = cost,
-            photos = photos?.joinToString(",", transform = { it.url }) ?: "",
+            photos = photos?.joinToString(",") { it.url } ?: "",
             source = "amap",
             searchCenter = centerKey,
             cachedAt = now
         )
-    }
+    }.getOrNull()
 
     companion object {
         private const val CACHE_TTL = 30L * 24 * 3600 * 1000 // 30 天
         private const val MAX_PAGES_PER_POINT = 8
         private const val MAX_TOTAL_CALLS = 120
 
-        /** 分类 chips → 高德 types（050000 为餐饮服务大类） */
         val FOOD_TYPES = mapOf(
             "全部" to "050000",
             "火锅" to "050301",

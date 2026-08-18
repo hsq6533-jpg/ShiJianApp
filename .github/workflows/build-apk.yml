@@ -22,20 +22,23 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
 
-      - name: Build debug APK
+      - name: Build debug APK (direct to console + save log)
         shell: bash
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon --console=plain --stacktrace > build-output.log 2>&1
-          EXIT=$?
+          # 直接输出到 Actions log，同时保存文件；不通过 pipe，确保 exit code 正确
+          set +e
+          ./gradlew assembleDebug --no-daemon --console=plain --stacktrace 2>&1 | tee build-output.log
+          EXIT=${PIPESTATUS[0]}
+          set -e
           echo "gradle exit code: $EXIT"
-          # 上传到 0x0.st 方便排查（公开链接，7天后自动过期）
-          if [ -f build-output.log ]; then
-            URL=$(curl -s -F "file=@build-output.log" https://0x0.st || true)
-            if [ -n "$URL" ]; then
-              safe=$(printf '%s' "$URL" | sed 's/%/%25/g; s/\r/%0D/g; s/\n/%0A/g')
-              echo "::warning::build-output-log uploaded to: $safe"
-            fi
+          # 尝试把 log 最后 30 行 echo 成 ::warning 方便不登录查看
+          tail -n 30 build-output.log | while IFS= read -r line; do
+            safe=$(printf '%s' "$line" | sed 's/%/%25/g; s/\r/%0D/g; s/\n/%0A/g')
+            echo "::warning::gradle: $safe"
+          done || true
+          if [ $EXIT -ne 0 ]; then
+            echo "::error::Gradle build failed with exit code $EXIT (see step log above)"
           fi
           exit $EXIT
 

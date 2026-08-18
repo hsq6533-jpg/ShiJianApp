@@ -26,8 +26,12 @@ jobs:
         shell: bash
         run: |
           chmod +x gradlew
-          set -o pipefail
-          ./gradlew assembleDebug --no-daemon --console=plain --stacktrace 2>&1 | tee build-output.log
+          ./gradlew assembleDebug --no-daemon --console=plain --stacktrace > build-output.log 2>&1
+          EXIT=$?
+          echo "gradle exit code: $EXIT"
+          echo "===== tail -200 build-output.log ====="
+          tail -200 build-output.log || true
+          exit $EXIT
 
       - name: Upload build output log
         if: always()

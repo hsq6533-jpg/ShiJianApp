@@ -52,6 +52,7 @@ import com.shijian.app.ui.theme.TextSecondary
 import com.shijian.app.util.DateUtils
 import com.shijian.app.util.FormatUtils
 import com.shijian.app.util.categoryEmoji
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 
@@ -76,8 +77,10 @@ fun CalendarDetailScreen(
     nav: (String) -> Unit
 ) {
     val scope = rememberCoroutineScope()
-    val list by container.transactionRepo.byDate(date)
-        .collectAsStateWithLifecycle(initialValue = emptyList())
+    val list by remember(date) {
+        container.transactionRepo.byDate(date)
+            .catch { emit(emptyList()) }
+    }.collectAsStateWithLifecycle(initialValue = emptyList())
     var deleteTarget by remember { mutableStateOf<TransactionEntity?>(null) }
 
     val day = remember(date) { runCatching { DateUtils.parseYmd(date) }.getOrNull() }
@@ -178,7 +181,9 @@ fun CalendarDetailScreen(
             text = { Text("确定删除这笔「${target.category} ¥${FormatUtils.amount(target.amount)}」吗？") },
             confirmButton = {
                 TextButton(onClick = {
-                    scope.launch { container.transactionRepo.delete(target) }
+                    scope.launch {
+                        runCatching { container.transactionRepo.delete(target) }
+                    }
                     deleteTarget = null
                 }) { Text("删除", color = Danger500) }
             },

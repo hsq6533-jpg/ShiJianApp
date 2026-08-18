@@ -83,6 +83,14 @@ fun AppNavHost(
             composable(Routes.FOOD) {
                 FoodScreen(container = container, nav = navigate)
             }
+            // 开销 Tab 基础路由（不带参数），直接显示全部
+            composable(Routes.EXPENSE) {
+                ExpenseScreen(
+                    container = container,
+                    nav = navigate,
+                    initialFilter = ""
+                )
+            }
             composable(
                 route = Routes.EXPENSE_FILTER,
                 arguments = listOf(

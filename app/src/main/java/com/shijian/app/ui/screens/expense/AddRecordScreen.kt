@@ -56,6 +56,8 @@ import com.shijian.app.ui.theme.Success500
 import com.shijian.app.ui.theme.TextSecondary
 import com.shijian.app.util.DateUtils
 import com.shijian.app.util.FormatUtils
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalDate
@@ -95,19 +97,22 @@ fun AddRecordScreen(
     var showError by remember { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
 
-    // 分类
+    // 分类（Flow 容错：数据库异常不崩）
     val dbType = if (typeChip == "收入") "INCOME" else "EXPENSE"
-    val categories by container.database.categoryDao().observeByType(dbType)
-        .collectAsStateWithLifecycle(initialValue = emptyList())
+    val categories by remember(dbType) {
+        container.database.categoryDao().observeByType(dbType)
+            .catch { emit(emptyList()) }
+    }.collectAsStateWithLifecycle(initialValue = emptyList())
     if (selectedCategory == null && categories.isNotEmpty()) {
         selectedCategory = categories.first().name
     }
 
-    // 编辑模式回填
+    // 编辑模式回填（任何异常不崩，最多不回填）
     var editing by remember { mutableStateOf<TransactionEntity?>(null) }
     if (editId != null && editing == null) {
         LaunchedEffect(editId) {
-            container.transactionRepo.byId(editId).collect { entity ->
+            runCatching {
+                val entity = container.transactionRepo.byId(editId).firstOrNull()
                 if (entity != null && editing == null) {
                     typeChip = if (entity.isReimbursable) "待报销" else if (entity.type == "INCOME") "收入" else "支出"
                     selectedCategory = entity.category
@@ -115,19 +120,21 @@ fun AddRecordScreen(
                     remark = entity.remark
                     merchant = entity.merchant
                     reimbursable = entity.isReimbursable
-                    date = DateUtils.parseYmd(entity.date)
-                    time = LocalTime.parse(entity.time)
+                    date = runCatching { DateUtils.parseYmd(entity.date) }.getOrDefault(defaultDate)
+                    time = runCatching { LocalTime.parse(entity.time) }.getOrDefault(LocalTime.now())
                     editing = entity
                 }
             }
         }
     }
 
-    // 奶茶杯数提示
+    // 奶茶杯数提示（容错）
     var milkTeaCount by remember { mutableIntStateOf(0) }
     LaunchedEffect(selectedCategory, date) {
-        if (selectedCategory == "奶茶") {
-            milkTeaCount = container.transactionRepo.milkTeaCountOn(DateUtils.ymd(date)) + 1
+        runCatching {
+            if (selectedCategory == "奶茶") {
+                milkTeaCount = container.transactionRepo.milkTeaCountOn(DateUtils.ymd(date)) + 1
+            }
         }
     }
 

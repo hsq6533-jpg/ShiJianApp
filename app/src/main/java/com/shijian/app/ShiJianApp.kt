@@ -19,18 +19,28 @@ class ShiJianApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        Thread.setDefaultUncaughtExceptionHandler { _, e ->
-            // 全局兜底：任何未捕获异常只记录，直接让进程退出（避免闪退到系统 ANR），
-            // 但我们已在各关键路径做了 try/catch，极少会到这里。
-            android.util.Log.e("ShiJianApp", "uncaught", e)
+        // 全局兜底：保存系统原 Handler，先记录日志，再交给系统处理（避免 ANR，确保能正常崩溃上报）
+        val sysHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { t, e ->
+            android.util.Log.e("ShiJianApp", "uncaught on thread=${t.name}", e)
+            // 关键：交给系统原有 handler 处理（弹出崩溃对话框 / 上报 / 杀进程）
+            // 如果系统 handler 不可用，就直接杀进程防止 ANR
+            runCatching { sysHandler?.uncaughtException(t, e) }.onFailure {
+                android.os.Process.killProcess(android.os.Process.myPid())
+                System.exit(1)
+            }
         }
         container = try {
             AppContainer(this)
         } catch (e: Exception) {
-            android.util.Log.e("ShiJianApp", "container init failed", e)
-            AppContainer(this) // 再试一次（AppContainer 内部有降级）
+            android.util.Log.e("ShiJianApp", "container init failed, retry once", e)
+            runCatching { AppContainer(this) }.getOrElse { e2 ->
+                // 两次都失败：极端情况（Keystore/SQLCipher/磁盘全挂），让进程退出而不是在后续生命周期里随机崩
+                android.util.Log.e("ShiJianApp", "container init retry failed, abort", e2)
+                throw RuntimeException("AppContainer init failed after retry", e2)
+            }
         }
-        seedDefaults()
+        runCatching { seedDefaults() }
         appScope.launch {
             runCatching { NewsScheduler.schedule(this@ShiJianApp, container.newsRepo, container.settingsRepo) }
         }

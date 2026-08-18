@@ -3,6 +3,7 @@ package com.shijian.app.ui.screens.news
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -71,35 +72,39 @@ fun NewsSettingsScreen(
     var deepSeekKey by remember { mutableStateOf("") }
 
     LaunchedEffect(Unit) {
-        val cfg = container.newsRepo.getConfig()
-        period = cfg.pushFrequency
-        hour = cfg.pushHour
-        weekday = cfg.pushWeekday
-        day = cfg.pushDay
-        keywords = cfg.specialKeywords.split(",").map { it.trim() }
-            .filter { it.isNotBlank() }.map { it to true }
-        contentLength = cfg.contentLength
-        pushEnabled = cfg.pushEnabled
-        deepSeekKey = container.securePrefs.getDeepSeekKey().orEmpty()
+        runCatching {
+            val cfg = container.newsRepo.getConfig()
+            period = cfg.pushFrequency
+            hour = cfg.pushHour
+            weekday = cfg.pushWeekday
+            day = cfg.pushDay
+            keywords = cfg.specialKeywords.split(",").map { it.trim() }
+                .filter { it.isNotBlank() }.map { it to true }
+            contentLength = cfg.contentLength
+            pushEnabled = cfg.pushEnabled
+            deepSeekKey = container.securePrefs.getDeepSeekKey().orEmpty()
+        }
     }
 
     val persist: () -> Unit = {
         scope.launch {
-            val cfg = container.newsRepo.getConfig()
-            container.newsRepo.saveConfig(
-                cfg.copy(
-                    pushFrequency = period,
-                    pushHour = hour,
-                    pushMinute = 0,
-                    pushWeekday = weekday,
-                    pushDay = day,
-                    specialKeywords = keywords.joinToString(",") { it.first },
-                    contentLength = contentLength,
-                    pushEnabled = pushEnabled,
-                    enabled = true
+            runCatching {
+                val cfg = container.newsRepo.getConfig()
+                container.newsRepo.saveConfig(
+                    cfg.copy(
+                        pushFrequency = period,
+                        pushHour = hour,
+                        pushMinute = 0,
+                        pushWeekday = weekday,
+                        pushDay = day,
+                        specialKeywords = keywords.joinToString(",") { it.first },
+                        contentLength = contentLength,
+                        pushEnabled = pushEnabled,
+                        enabled = true
+                    )
                 )
-            )
-            NewsScheduler.schedule(context, container.newsRepo, container.settingsRepo)
+                NewsScheduler.schedule(context, container.newsRepo, container.settingsRepo)
+            }
         }
     }
 
@@ -107,7 +112,7 @@ fun NewsSettingsScreen(
         period = "DAILY"; hour = 8; weekday = 1; day = 1
         keywords = emptyList(); kwInput = ""
         contentLength = "MEDIUM"; pushEnabled = false
-        container.securePrefs.setDeepSeekKey(null)
+        runCatching { container.securePrefs.setDeepSeekKey(null) }
         deepSeekKey = ""
         persist()
         Toast.makeText(context, "已恢复默认设置", Toast.LENGTH_SHORT).show()
@@ -179,7 +184,7 @@ fun NewsSettingsScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .verticalScroll(rememberScrollState(), reverseScrolling = true),
+                            .horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         WEEKDAYS.forEachIndexed { i, w ->
@@ -259,7 +264,7 @@ fun NewsSettingsScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .verticalScroll(rememberScrollState(), reverseScrolling = true),
+                            .horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         keywords.forEach { (kw, special) ->

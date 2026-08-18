@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -56,6 +57,7 @@ import com.shijian.app.ui.theme.Brand500
 import com.shijian.app.ui.theme.Orange500
 import com.shijian.app.ui.theme.TextSecondary
 import com.shijian.app.util.DateUtils
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -69,7 +71,10 @@ fun NewsScreen(
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    val news by container.newsRepo.observeNews().collectAsStateWithLifecycle(initialValue = emptyList())
+    val news by remember {
+        container.newsRepo.observeNews()
+            .catch { emit(emptyList()) }
+    }.collectAsStateWithLifecycle(initialValue = emptyList())
     var config by remember { mutableStateOf<NewsConfigEntity?>(null) }
     var filter by rememberSaveable { mutableStateOf("全部") }
     var refreshing by remember { mutableStateOf(false) }
@@ -165,7 +170,7 @@ fun NewsScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .verticalScroll(rememberScrollState(), reverseScrolling = true),
+                        .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     cats.forEach { c ->

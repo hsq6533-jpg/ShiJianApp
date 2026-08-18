@@ -47,6 +47,7 @@ import com.shijian.app.ui.theme.Danger500
 import com.shijian.app.ui.theme.Success500
 import com.shijian.app.ui.theme.TextSecondary
 import com.shijian.app.util.categoryEmoji
+import kotlinx.coroutines.flow.catch
 import java.time.LocalDate
 
 private val CHART_COLORS = listOf(Chart1, Chart2, Chart3, Chart4, Chart5, Chart6, Chart7)
@@ -57,7 +58,10 @@ fun StatsScreen(
     container: AppContainer,
     onBack: () -> Unit
 ) {
-    val all by container.transactionRepo.all().collectAsStateWithLifecycle(initialValue = emptyList())
+    val all by remember {
+        container.transactionRepo.all()
+            .catch { emit(emptyList()) }
+    }.collectAsStateWithLifecycle(initialValue = emptyList())
     var isYear by remember { mutableStateOf(false) }
     val now = LocalDate.now()
 

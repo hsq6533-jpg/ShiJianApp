@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.shijian.app.AppContainer
 import com.shijian.app.data.db.entity.TransactionEntity
+import com.shijian.app.data.prefs.AppSettings
 import com.shijian.app.data.prefs.RestMode
 import com.shijian.app.ui.components.SjCard
 import com.shijian.app.ui.components.TabTopBar
@@ -64,29 +65,41 @@ import com.shijian.app.util.DateUtils
 import com.shijian.app.util.FormatUtils
 import com.shijian.app.util.categoryEmoji
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.LocalTime
 
 @Composable
 fun HomeScreen(container: AppContainer, nav: (String) -> Unit) {
-    val settings by container.settingsRepo.settings.collectAsStateWithLifecycle()
+    val settings by remember {
+        container.settingsRepo.settings
+            .catch { emit(AppSettings()) }
+    }.collectAsStateWithLifecycle(initialValue = AppSettings())
     val today = remember { LocalDate.now() }
 
     // 页面月份（默认为当月）
     var year by rememberSaveable { mutableIntStateOf(today.year) }
     var month by rememberSaveable { mutableIntStateOf(today.monthValue) }
 
-    // 本月与全量数据
-    val monthList by container.transactionRepo.month(year, month)
-        .collectAsStateWithLifecycle(initialValue = emptyList())
-    val allList by container.transactionRepo.all()
-        .collectAsStateWithLifecycle(initialValue = emptyList())
+    // 本月与全量数据（所有 Flow 均 catch 异常，防止数据库/SQLCipher 崩溃导致闪退）
+    val monthList by remember(year, month) {
+        container.transactionRepo.month(year, month)
+            .catch { emit(emptyList()) }
+    }.collectAsStateWithLifecycle(initialValue = emptyList())
+    val allList by remember {
+        container.transactionRepo.all()
+            .catch { emit(emptyList()) }
+    }.collectAsStateWithLifecycle(initialValue = emptyList())
 
     // 本周数据
     val (monday, sunday) = remember(today) { DateUtils.weekRange(today) }
-    val weekList by container.transactionRepo.weekRange(monday, sunday)
-        .collectAsStateWithLifecycle(initialValue = emptyList())
+    val weekList by remember(monday, sunday) {
+        container.transactionRepo.weekRange(monday, sunday)
+            .catch { emit(emptyList()) }
+    }.collectAsStateWithLifecycle(initialValue = emptyList())
 
     // 随机美食弹窗
     var showRandom by remember { mutableStateOf(false) }

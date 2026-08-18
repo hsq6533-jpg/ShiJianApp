@@ -35,6 +35,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.shijian.app.AppContainer
+import com.shijian.app.data.prefs.AppSettings
 import com.shijian.app.ui.components.ListRow
 import com.shijian.app.ui.components.SjCard
 import com.shijian.app.ui.components.SubPageTopBar
@@ -44,6 +45,7 @@ import com.shijian.app.ui.theme.Brand100
 import com.shijian.app.ui.theme.Brand500
 import com.shijian.app.ui.theme.Danger500
 import com.shijian.app.ui.theme.TextSecondary
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
 
 private val RADIUS_OPTIONS = listOf(1, 2, 3, 5, 8, 10)
@@ -57,7 +59,10 @@ fun FoodSettingsScreen(
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    val settings by container.settingsRepo.settings.collectAsStateWithLifecycle()
+    val settings by remember {
+        container.settingsRepo.settings
+            .catch { emit(AppSettings()) }
+    }.collectAsStateWithLifecycle(initialValue = AppSettings())
 
     var amapKey by remember { mutableStateOf("") }
     var showClear by remember { mutableStateOf(false) }
@@ -206,8 +211,10 @@ fun FoodSettingsScreen(
                 TextButton(onClick = {
                     showClear = false
                     scope.launch {
-                        container.foodRepo.clearCache()
-                        toast("美食缓存已清除")
+                        runCatching {
+                            container.foodRepo.clearCache()
+                        }.onSuccess { toast("美食缓存已清除") }
+                            .onFailure { toast("清除失败，请重试") }
                     }
                 }) { Text("清除", color = Danger500) }
             },

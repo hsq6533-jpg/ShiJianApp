@@ -58,6 +58,7 @@ import com.shijian.app.ui.theme.TextSecondary
 import com.shijian.app.util.DateUtils
 import com.shijian.app.util.FormatUtils
 import com.shijian.app.util.categoryEmoji
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 
@@ -73,10 +74,14 @@ fun ExpenseScreen(
     var filter by rememberSaveable { mutableStateOf(initialFilter.ifEmpty { "全部" }) }
     var deleteTarget by remember { mutableStateOf<TransactionEntity?>(null) }
 
-    val monthList by container.transactionRepo.month(year, month)
-        .collectAsStateWithLifecycle(initialValue = emptyList())
-    val allList by container.transactionRepo.all()
-        .collectAsStateWithLifecycle(initialValue = emptyList())
+    val monthList by remember(year, month) {
+        container.transactionRepo.month(year, month)
+            .catch { emit(emptyList()) }
+    }.collectAsStateWithLifecycle(initialValue = emptyList())
+    val allList by remember {
+        container.transactionRepo.all()
+            .catch { emit(emptyList()) }
+    }.collectAsStateWithLifecycle(initialValue = emptyList())
     val scope = androidx.compose.runtime.rememberCoroutineScope()
 
     val income = monthList.filter { it.type == "INCOME" }.sumOf { it.amount }

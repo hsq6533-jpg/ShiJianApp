@@ -7,16 +7,18 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.shijian.app.data.prefs.AppSettings
 import com.shijian.app.data.prefs.DarkMode
 import com.shijian.app.ui.navigation.AppNavHost
 import com.shijian.app.ui.navigation.Routes
 import com.shijian.app.ui.screens.profile.UpdateDialog
 import com.shijian.app.ui.theme.ShiJianTheme
+import kotlinx.coroutines.flow.catch
 
 class MainActivity : ComponentActivity() {
 
@@ -31,7 +33,11 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         setContent {
-            val settings by container.settingsRepo.settings.collectAsState()
+            // 改用生命周期感知的 collectAsStateWithLifecycle + catch，防止配置变更时闪退
+            val settings by remember {
+                container.settingsRepo.settings
+                    .catch { emit(AppSettings()) }
+            }.collectAsStateWithLifecycle(initialValue = AppSettings())
             val darkTheme = when (settings.darkMode) {
                 DarkMode.SYSTEM -> isSystemInDarkTheme()
                 DarkMode.LIGHT -> false

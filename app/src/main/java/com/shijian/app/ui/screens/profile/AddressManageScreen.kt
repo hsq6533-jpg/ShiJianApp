@@ -48,6 +48,7 @@ import com.shijian.app.ui.components.SubPageTopBar
 import com.shijian.app.ui.theme.Brand500
 import com.shijian.app.ui.theme.Danger500
 import com.shijian.app.ui.theme.TextSecondary
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
 
 /** 地址管理（设计稿：地址管理 + PRD 5.4） */
@@ -58,7 +59,10 @@ fun AddressManageScreen(
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    val addresses by container.addressRepo.observeAll().collectAsStateWithLifecycle(initialValue = emptyList())
+    val addresses by remember {
+        container.addressRepo.observeAll()
+            .catch { emit(emptyList()) }
+    }.collectAsStateWithLifecycle(initialValue = emptyList())
 
     var editing by remember { mutableStateOf<SearchAddressEntity?>(null) }
     var adding by remember { mutableStateOf(false) }
@@ -103,8 +107,10 @@ fun AddressManageScreen(
                             item = a,
                             onSetDefault = {
                                 scope.launch {
-                                    container.addressRepo.setDefault(a)
-                                    toast("已将「${a.name}」设为默认地址")
+                                    runCatching {
+                                        container.addressRepo.setDefault(a)
+                                    }.onSuccess { toast("已将「${a.name}」设为默认地址") }
+                                        .onFailure { toast("设置失败，请重试") }
                                 }
                             },
                             onEdit = { editing = a },
@@ -143,8 +149,10 @@ fun AddressManageScreen(
             onDismiss = { adding = false },
             onSave = { name, addr ->
                 scope.launch {
-                    container.addressRepo.add(name, addr, null, null)
-                    toast("地址已添加")
+                    runCatching {
+                        container.addressRepo.add(name, addr, null, null)
+                    }.onSuccess { toast("地址已添加") }
+                        .onFailure { toast("添加失败，请重试") }
                 }
                 adding = false
             }
@@ -157,7 +165,9 @@ fun AddressManageScreen(
             initial = a,
             onDismiss = { editing = null },
             onSave = { name, addr ->
-                scope.launch { container.addressRepo.update(a.copy(name = name, address = addr)) }
+                scope.launch {
+                    runCatching { container.addressRepo.update(a.copy(name = name, address = addr)) }
+                }
                 editing = null
             }
         )
@@ -170,7 +180,9 @@ fun AddressManageScreen(
             text = { Text("确定删除「${a.name}」吗？此操作不可恢复。") },
             confirmButton = {
                 TextButton(onClick = {
-                    scope.launch { container.addressRepo.delete(a) }
+                    scope.launch {
+                        runCatching { container.addressRepo.delete(a) }
+                    }
                     deleting = null
                 }) { Text("删除", color = Danger500) }
             },

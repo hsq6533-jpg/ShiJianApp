@@ -18,19 +18,21 @@ class AppContainer(context: Context) {
 
     val appContext: Context = context.applicationContext
 
-    /** EncryptedSharedPreferences（内部已自带损坏降级） */
+    /** EncryptedSharedPreferences（内部已自带损坏降级）；
+     *  若仍失败（极端：Keystore 完全不可用），走强制明文次构造（不递归，100% 兜底到内存模式）。 */
     val securePrefs: SecurePrefs = try {
         SecurePrefs(appContext)
     } catch (e: Exception) {
-        // 最终兜底：反射不可用时，构造失败，但仍提供 SecurePrefs(ctx) 的降级路径。
-        SecurePrefs(appContext)
+        android.util.Log.e("AppContainer", "SecurePrefs primary failed, fallback forcePlain", e)
+        SecurePrefs(appContext, forcePlain = true)
     }
 
     /** SQLCipher + Room 数据库（SQLCipher 加载/升级失败会自动重建空库） */
     val database: AppDatabase = buildDatabase(appContext, securePrefs)
 
-    /** 各业务仓库 */
+    /** 各业务仓库（transactionRepo 是 expenseRepo 的别名，兼容旧调用） */
     val expenseRepo: TransactionRepository = TransactionRepository(database.transactionDao())
+    val transactionRepo: TransactionRepository get() = expenseRepo
     val foodRepo: FoodRepository = FoodRepository(database.foodPoiDao())
     val addressRepo: AddressRepository = AddressRepository(database.searchAddressDao())
     val settingsRepo: SettingsRepository = SettingsRepository(appContext)

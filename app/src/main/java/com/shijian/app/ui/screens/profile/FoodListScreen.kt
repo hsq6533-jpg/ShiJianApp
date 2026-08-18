@@ -39,6 +39,7 @@ import com.shijian.app.ui.theme.Danger500
 import com.shijian.app.ui.theme.Orange500
 import com.shijian.app.ui.theme.TextSecondary
 import com.shijian.app.util.FormatUtils
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
 
 /** 收藏 / 拉黑管理（我的页 → 美食设置，PRD 4.5.3） */
@@ -52,9 +53,11 @@ fun FoodListScreen(
     val context = LocalContext.current
     val isFavs = type == "favorites"
     val list = if (isFavs)
-        container.foodRepo.observeFavorites().collectAsStateWithLifecycle(initialValue = emptyList())
+        remember { container.foodRepo.observeFavorites().catch { emit(emptyList()) } }
+            .collectAsStateWithLifecycle(initialValue = emptyList())
     else
-        container.foodRepo.observeBlacklisted().collectAsStateWithLifecycle(initialValue = emptyList())
+        remember { container.foodRepo.observeBlacklisted().catch { emit(emptyList()) } }
+            .collectAsStateWithLifecycle(initialValue = emptyList())
 
     val toast: (String) -> Unit = { msg -> Toast.makeText(context, msg, Toast.LENGTH_SHORT).show() }
 

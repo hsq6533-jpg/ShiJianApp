@@ -50,6 +50,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.shijian.app.AppContainer
 import com.shijian.app.BuildConfig
 import com.shijian.app.data.db.entity.TransactionEntity
+import com.shijian.app.data.prefs.AppSettings
 import com.shijian.app.data.prefs.DarkMode
 import com.shijian.app.data.prefs.RestMode
 import com.shijian.app.ui.components.SjCard
@@ -70,6 +71,7 @@ import com.shijian.app.ui.theme.Teal100
 import com.shijian.app.ui.theme.Teal500
 import com.shijian.app.ui.theme.TextSecondary
 import com.shijian.app.util.DateUtils
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.time.LocalDate
@@ -83,15 +85,24 @@ fun ProfileScreen(
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    val settings by container.settingsRepo.settings.collectAsStateWithLifecycle()
+    val settings by remember {
+        container.settingsRepo.settings
+            .catch { emit(AppSettings()) }
+    }.collectAsStateWithLifecycle(initialValue = AppSettings())
 
     var recordCount by remember { mutableStateOf(0) }
     var dayCount by remember { mutableStateOf(0) }
     var streak by remember { mutableStateOf(0) }
     var newsSummary by remember { mutableStateOf("每天 8:00") }
 
-    val favs by container.foodRepo.observeFavorites().collectAsStateWithLifecycle(initialValue = emptyList())
-    val blocks by container.foodRepo.observeBlacklisted().collectAsStateWithLifecycle(initialValue = emptyList())
+    val favs by remember {
+        container.foodRepo.observeFavorites()
+            .catch { emit(emptyList()) }
+    }.collectAsStateWithLifecycle(initialValue = emptyList())
+    val blocks by remember {
+        container.foodRepo.observeBlacklisted()
+            .catch { emit(emptyList()) }
+    }.collectAsStateWithLifecycle(initialValue = emptyList())
 
     // 弹窗状态
     var showBackup by remember { mutableStateOf(false) }
@@ -104,15 +115,19 @@ fun ProfileScreen(
     val toast: (String) -> Unit = { msg -> Toast.makeText(context, msg, Toast.LENGTH_SHORT).show() }
 
     LaunchedEffect(Unit) {
-        val all = container.transactionRepo.all().first()
-        recordCount = all.size
-        dayCount = all.map { it.date }.distinct().size
-        streak = streakDays(all)
-        container.newsRepo.getConfig()?.let { cfg ->
-            newsSummary = when (cfg.pushFrequency) {
-                "WEEKLY" -> "每周${"一二三四五六日"[cfg.pushWeekday - 1]} ${cfg.pushHour}:00"
-                "MONTHLY" -> "每月 ${cfg.pushDay} 日 ${cfg.pushHour}:00"
-                else -> "每天 ${cfg.pushHour}:00"
+        runCatching {
+            val all = container.transactionRepo.all().first()
+            recordCount = all.size
+            dayCount = all.map { it.date }.distinct().size
+            streak = streakDays(all)
+            runCatching {
+                container.newsRepo.getConfig()?.let { cfg ->
+                    newsSummary = when (cfg.pushFrequency) {
+                        "WEEKLY" -> "每周${"一二三四五六日"[cfg.pushWeekday - 1]} ${cfg.pushHour}:00"
+                        "MONTHLY" -> "每月 ${cfg.pushDay} 日 ${cfg.pushHour}:00"
+                        else -> "每天 ${cfg.pushHour}:00"
+                    }
+                }
             }
         }
     }
@@ -314,11 +329,13 @@ fun ProfileScreen(
                 TextButton(onClick = {
                     showClear = false
                     scope.launch {
-                        container.database.transactionDao().clearAll()
-                        container.database.foodPoiDao().clearAll()
-                        container.addressRepo.clearAll()
-                        container.database.newsDao().clearAll()
-                        toast("本地数据已清空")
+                        runCatching {
+                            container.database.transactionDao().clearAll()
+                            container.database.foodPoiDao().clearAll()
+                            container.addressRepo.clearAll()
+                            container.database.newsDao().clearAll()
+                        }.onSuccess { toast("本地数据已清空") }
+                            .onFailure { toast("清空失败，请重试") }
                     }
                 }) { Text("清空", color = Danger500) }
             },

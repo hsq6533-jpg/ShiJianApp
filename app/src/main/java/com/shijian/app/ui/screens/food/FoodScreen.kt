@@ -159,6 +159,46 @@ fun FoodScreen(
     var picking by remember { mutableStateOf(false) }
     var blacklistTarget by remember { mutableStateOf<FoodPoiEntity?>(null) }
 
+    // 随机推荐：先确保有定位中心 → 周边搜索 → 排除奶茶甜品 → 随机挑一个
+    val pick: () -> Unit = {
+        picking = true
+        scope.launch {
+            runCatching {
+                val key = container.securePrefs.getAmapKey()
+                var c = center
+                if (c == null || c?.lat == null || c?.lng == null) {
+                    val loc = LocationUtils.getCurrentLocation(context)
+                    if (loc != null) {
+                        c = SearchCenter("我的定位", loc.latitude, loc.longitude)
+                        center = c
+                    }
+                }
+                val lat = c?.lat
+                val lng = c?.lng
+                if (lat != null && lng != null && !key.isNullOrBlank()) {
+                    // 周边搜索（半径用设置里的预设距离）
+                    container.foodRepo.searchAround(
+                        key, lat, lng,
+                        settings.searchRadiusKm, null, null, settings.multiPointSearch
+                    )
+                    val all = container.foodRepo.results.value.filter { !it.isBlacklisted }
+                    // 优先非奶茶/甜品/咖啡/饮品类
+                    val preferred = all.filter { poi ->
+                        val t = poi.type + poi.name
+                        !(t.contains("奶茶") || t.contains("甜品") || t.contains("咖啡") ||
+                            t.contains("饮品") || t.contains("蛋糕") || t.contains("面包") ||
+                            t.contains("冰淇淋") || t.contains("茶艺") || t.contains("果饮"))
+                    }
+                    picked = (preferred.ifEmpty { all }).randomOrNull()
+                } else {
+                    // 无中心或未配置 Key：从本地缓存随机
+                    picked = container.foodRepo.randomPick()
+                }
+            }
+            picking = false
+        }
+    }
+
     // 首次进入：自动定位为搜索中心（定位不可用则用默认地址），定位完成后自动随机推荐
     var locatedOnce by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(Unit) {
@@ -180,44 +220,6 @@ fun FoodScreen(
         }
         center = c
         runCatching { pick() }
-    }
-
-    // 随机推荐：先确保有定位中心 → 周边搜索 → 排除奶茶甜品 → 随机挑一个
-    val pick: () -> Unit = {
-        picking = true
-        scope.launch {
-            runCatching {
-                val key = container.securePrefs.getAmapKey()
-                var c = center
-                if (c == null || c.lat == null || c.lng == null) {
-                    val loc = LocationUtils.getCurrentLocation(context)
-                    if (loc != null) {
-                        c = SearchCenter("我的定位", loc.latitude, loc.longitude)
-                        center = c
-                    }
-                }
-                if (c?.lat != null && c.lng != null && !key.isNullOrBlank()) {
-                    // 周边搜索（半径用设置里的预设距离）
-                    container.foodRepo.searchAround(
-                        key, c.lat!!, c.lng!!,
-                        settings.searchRadiusKm, null, null, settings.multiPointSearch
-                    )
-                    val all = container.foodRepo.results.value.filter { !it.isBlacklisted }
-                    // 优先非奶茶/甜品/咖啡/饮品类
-                    val preferred = all.filter { poi ->
-                        val t = poi.type + poi.name
-                        !(t.contains("奶茶") || t.contains("甜品") || t.contains("咖啡") ||
-                            t.contains("饮品") || t.contains("蛋糕") || t.contains("面包") ||
-                            t.contains("冰淇淋") || t.contains("茶艺") || t.contains("果饮"))
-                    }
-                    picked = (preferred.ifEmpty { all }).randomOrNull()
-                } else {
-                    // 无中心或未配置 Key：从本地缓存随机
-                    picked = container.foodRepo.randomPick()
-                }
-            }
-            picking = false
-        }
     }
 
     val toast: (String) -> Unit = { msg -> Toast.makeText(context, msg, Toast.LENGTH_SHORT).show() }

@@ -29,8 +29,11 @@ jobs:
           ./gradlew assembleDebug --no-daemon --console=plain --stacktrace > build-output.log 2>&1
           EXIT=$?
           echo "gradle exit code: $EXIT"
-          echo "===== tail -200 build-output.log ====="
-          tail -200 build-output.log || true
+          echo "===== tail -n 80 build-output.log (as warnings) ====="
+          tail -n 80 build-output.log | while IFS= read -r line; do
+            safe=$(printf '%s' "$line" | sed 's/%/%25/g; s/\r/%0D/g; s/\n/%0A/g')
+            echo "::warning::$safe"
+          done || true
           exit $EXIT
 
       - name: Upload build output log

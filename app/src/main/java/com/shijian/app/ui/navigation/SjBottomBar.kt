@@ -1,6 +1,8 @@
 package com.shijian.app.ui.navigation
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountBalanceWallet
@@ -45,6 +47,7 @@ fun SjBottomBar(
         border = BorderStroke(0.5.dp, Color(0x1F000000))
     ) {
         NavigationBar(
+            modifier = Modifier.height(56.dp),
             containerColor = MaterialTheme.colorScheme.surface,
             tonalElevation = 0.dp
         ) {
@@ -63,11 +66,12 @@ fun SjBottomBar(
                     icon = {
                         Icon(
                             imageVector = tab.icon,
-                            contentDescription = tab.label
+                            contentDescription = tab.label,
+                            modifier = Modifier.height(22.dp)
                         )
                     },
                     label = {
-                        Text(text = tab.label, fontSize = 12.sp, maxLines = 1)
+                        Text(text = tab.label, fontSize = 11.sp, maxLines = 1)
                     },
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = MaterialTheme.colorScheme.primary,

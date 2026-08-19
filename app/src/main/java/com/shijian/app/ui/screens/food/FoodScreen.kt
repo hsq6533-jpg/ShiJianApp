@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
+
 package com.shijian.app.ui.screens.food
 
 import android.Manifest
@@ -30,6 +32,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.LocationOn
@@ -41,6 +44,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -96,6 +100,18 @@ private val ADDRESS_KEYWORDS = listOf(
     "大厦", "广场", "中心", "小区", "公寓", "酒店", "公园", "桥", "门", "大道"
 )
 
+private val RANDOM_CATEGORIES = listOf(
+    "🍲 火锅", "🍢 烧烤", "🍜 面食", "🍰 甜品", "🍔 快餐"
+)
+
+private val RANDOM_CATEGORY_MAP = mapOf(
+    "🍲 火锅" to "火锅",
+    "🍢 烧烤" to "烧烤",
+    "🍜 面食" to "面食",
+    "🍰 甜品" to "甜品",
+    "🍔 快餐" to "快餐"
+)
+
 private fun isAddressQuery(q: String): Boolean {
     val s = q.trim()
     if (s.length < 3) return false
@@ -119,7 +135,7 @@ private fun friendlyError(raw: String?): String = when {
     else -> raw
 }
 
-@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FoodScreen(
     container: AppContainer,
@@ -129,80 +145,73 @@ fun FoodScreen(
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current
     val settings by remember {
-        container.settingsRepo.settings.catch { emit(AppSettings()) }
+        container.settingsRepo.settings
+            .catch { emit(AppSettings()) }
     }.collectAsStateWithLifecycle(initialValue = AppSettings())
     val addresses by remember {
-        container.addressRepo.observeAll().catch { emit(emptyList()) }
+        container.addressRepo.observeAll()
+            .catch { emit(emptyList()) }
     }.collectAsStateWithLifecycle(initialValue = emptyList())
     val results by remember {
-        container.foodRepo.results.catch { emit(emptyList()) }
+        container.foodRepo.results
+            .catch { emit(emptyList()) }
     }.collectAsStateWithLifecycle(initialValue = emptyList())
     val searching by remember {
-        container.foodRepo.searching.catch { emit(false) }
+        container.foodRepo.searching
+            .catch { emit(false) }
     }.collectAsStateWithLifecycle(initialValue = false)
     val error by remember {
-        container.foodRepo.error.catch { emit(null) }
+        container.foodRepo.error
+            .catch { emit(null) }
     }.collectAsStateWithLifecycle(initialValue = null)
+    val progress by remember {
+        container.foodRepo.progress
+            .catch { emit(0 to 0) }
+    }.collectAsStateWithLifecycle(initialValue = 0 to 0)
 
     var amapKey by remember { mutableStateOf(container.securePrefs.getAmapKey()) }
     var showKeySheet by remember { mutableStateOf(false) }
     var keyInput by rememberSaveable { mutableStateOf("") }
+
     var kw by rememberSaveable { mutableStateOf("") }
     var category by rememberSaveable { mutableStateOf("全部") }
     var sort by rememberSaveable { mutableStateOf("综合") }
     var hasSearched by rememberSaveable { mutableStateOf(false) }
+
     var center by remember { mutableStateOf<SearchCenter?>(null) }
     var showCenterPicker by remember { mutableStateOf(false) }
     var pickingLocation by remember { mutableStateOf(false) }
-    var picked by remember { mutableStateOf<FoodPoiEntity?>(null) }
-    var picking by remember { mutableStateOf(false) }
+
+    var showRandomDialog by remember { mutableStateOf(false) }
+    var showFetchProgress by remember { mutableStateOf(false) }
+
     var blacklistTarget by remember { mutableStateOf<FoodPoiEntity?>(null) }
 
-    val filterLocal: (List<FoodPoiEntity>, String, String, String) -> List<FoodPoiEntity> = {
-        list, keyword, cat, srt ->
-        val base = list.filter { !it.isBlacklisted }
-        val kwTrimed = keyword.trim()
-        val afterKw = if (kwTrimed.isBlank()) base else base.filter {
-            it.name.contains(kwTrimed) || it.type.contains(kwTrimed) || it.address.contains(kwTrimed)
-        }
-        val afterCat = if (cat == "全部") afterKw else afterKw.filter { it.type.contains(cat) || it.name.contains(cat) }
-        when (srt) {
-            "距离最近" -> afterCat.sortedBy { it.distance }
-            "评分最高" -> afterCat.sortedByDescending { it.rating ?: -1f }
-            else -> afterCat
-        }
-    }
-
-    val pick: () -> Unit = {
-        picking = true
-        scope.launch {
-            runCatching {
-                val base = container.foodRepo.results.value.filter { !it.isBlacklisted }.ifEmpty {
-                    runCatching {
-                        container.database.foodPoiDao().observeActive().let { flow ->
-                            kotlinx.coroutines.flow.firstOrNull(flow)
-                        }
-                    }.getOrNull() ?: emptyList()
-                }
-                if (base.isEmpty()) { picked = null; return@runCatching }
-                val preferred = base.filter { poi ->
-                    val t = poi.type + poi.name
-                    !(t.contains("奶茶") || t.contains("甜品") || t.contains("咖啡") ||
-                        t.contains("饮品") || t.contains("蛋糕") || t.contains("面包") ||
-                        t.contains("冰淇淋") || t.contains("茶艺") || t.contains("果饮"))
-                }
-                picked = (preferred.ifEmpty { base }).randomOrNull()
+    val filterLocal: (List<FoodPoiEntity>, String, String, String) -> List<FoodPoiEntity> =
+        { list, keyword, cat, srt ->
+            val base = list.filter { !it.isBlacklisted }
+            val kwTrimed = keyword.trim()
+            val afterKw = if (kwTrimed.isBlank()) base
+            else base.filter {
+                it.name.contains(kwTrimed) || it.type.contains(kwTrimed) || it.address.contains(kwTrimed)
             }
-            picking = false
+            val afterCat = if (cat == "全部") afterKw
+            else afterKw.filter { it.type.contains(cat) || it.name.contains(cat) }
+            when (srt) {
+                "距离最近" -> afterCat.sortedBy { it.distance }
+                "评分最高" -> afterCat.sortedByDescending { it.rating ?: -1f }
+                else -> afterCat
+            }
         }
-    }
 
     var locatedOnce by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         if (locatedOnce) return@LaunchedEffect
         locatedOnce = true
         var c: SearchCenter? = null
-        val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val granted = ContextCompat.checkSelfPermission(
+            context, Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
         if (granted) {
             pickingLocation = true
             val loc = runCatching { LocationUtils.getCurrentLocation(context) }.getOrNull()
@@ -214,17 +223,42 @@ fun FoodScreen(
             if (def != null) c = def.toCenter()
         }
         center = c
-        runCatching { pick() }
+
+        c?.let { centerVal ->
+            if (centerVal.lat != null && centerVal.lng != null) {
+                val key = container.securePrefs.getAmapKey()
+                if (!key.isNullOrBlank()) {
+                    val changed = container.settingsRepo.isLocationChanged(centerVal.lat, centerVal.lng)
+                    val freshBefore = System.currentTimeMillis() - 30L * 24 * 3600 * 1000
+                    val centerKey = "${centerVal.lng},${centerVal.lat}|${settings.searchRadiusKm}||"
+                    var cachedCount = 0
+                    try {
+                        cachedCount = container.database.foodPoiDao().cachedCount(centerKey, freshBefore)
+                    } catch (_: Exception) {}
+                    if (changed || cachedCount == 0) {
+                        showFetchProgress = true
+                        container.foodRepo.fetchAllAround(key, centerVal.lat, centerVal.lng, settings.searchRadiusKm)
+                        container.settingsRepo.setLastSearchLatLng(centerVal.lat, centerVal.lng)
+                        hasSearched = true
+                    }
+                }
+            }
+        }
     }
 
     val toast: (String) -> Unit = { msg -> Toast.makeText(context, msg, Toast.LENGTH_SHORT).show() }
 
     var useGps: () -> Unit = {}
-    val locationPermLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+    val locationPermLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
         if (granted) useGps() else toast("未授予定位权限，请在设置中允许后使用定位")
     }
+
     useGps = {
-        val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val granted = ContextCompat.checkSelfPermission(
+            context, Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
         if (!granted) {
             locationPermLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
         } else {
@@ -244,22 +278,38 @@ fun FoodScreen(
 
     val doSearch: () -> Unit = doSearch@ {
         val key = container.securePrefs.getAmapKey()
-        if (key.isNullOrBlank()) { showKeySheet = true; toast("请先配置高德 Key"); return@doSearch }
+        if (key.isNullOrBlank()) {
+            showKeySheet = true
+            toast("请先配置高德 Key")
+            return@doSearch
+        }
         hasSearched = true
         scope.launch {
             runCatching {
                 val q = kw.trim()
                 val c = center
                 when {
-                    isAddressQuery(q) -> container.foodRepo.searchByAddress(key, q, null, settings.searchRadiusKm, multiPoint = false, pagesPerPoint = 1)
-                    c?.lat != null && c.lng != null -> container.foodRepo.searchAround(key, c.lat!!, c.lng!!, settings.searchRadiusKm, keywords = q.ifBlank { null }, foodType = null, multiPoint = false, pagesPerPoint = 2)
-                    else -> container.foodRepo.searchByKeyword(key, q, null, pages = 1)
+                    isAddressQuery(q) -> container.foodRepo.searchByAddress(
+                        key, q, null,
+                        settings.searchRadiusKm, multiPoint = false
+                    )
+                    c?.lat != null && c.lng != null -> container.foodRepo.searchAround(
+                        key, c.lat!!, c.lng!!,
+                        settings.searchRadiusKm,
+                        keywords = q.ifBlank { null },
+                        foodType = null,
+                        multiPoint = settings.multiPointSearch
+                    )
+                    else -> container.foodRepo.searchByKeyword(key, q, null)
                 }
             }.onFailure { toast("搜索失败，请检查 Key 或网络") }
         }
     }
 
-    val displayed = remember(results, kw, category, sort) { filterLocal(results, kw, category, sort) }
+    val displayed = remember(results, kw, category, sort) {
+        filterLocal(results, kw, category, sort)
+    }
+
     val categoryCounts = remember(results) {
         val all = results.filter { !it.isBlacklisted }
         val counts = linkedMapOf<String, Int>()
@@ -277,14 +327,27 @@ fun FoodScreen(
             actions = {
                 Row {
                     IconButton(onClick = { showCenterPicker = true }) {
-                        Icon(Icons.Filled.Tune, contentDescription = "搜索中心", tint = MaterialTheme.colorScheme.onBackground)
+                        Icon(
+                            Icons.Filled.Tune,
+                            contentDescription = "搜索中心",
+                            tint = MaterialTheme.colorScheme.onBackground
+                        )
                     }
                     Box {
                         IconButton(onClick = { showKeySheet = true; keyInput = amapKey.orEmpty() }) {
-                            Icon(Icons.Filled.LocationOn, contentDescription = "美食设置", tint = MaterialTheme.colorScheme.onBackground)
+                            Icon(
+                                Icons.Filled.LocationOn,
+                                contentDescription = "美食设置",
+                                tint = MaterialTheme.colorScheme.onBackground
+                            )
                         }
                         if (amapKey.isNullOrBlank()) {
-                            Box(modifier = Modifier.size(9.dp).background(Danger500, CircleShape).align(Alignment.TopEnd))
+                            Box(
+                                modifier = Modifier
+                                    .size(9.dp)
+                                    .background(Danger500, CircleShape)
+                                    .align(Alignment.TopEnd)
+                            )
                         }
                     }
                 }
@@ -292,43 +355,128 @@ fun FoodScreen(
         )
 
         Column(
-            modifier = Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)
+            modifier = Modifier
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp)
         ) {
-            RandomHeroCard(
-                picked = picked, picking = picking, center = center, radiusKm = settings.searchRadiusKm,
-                onRandom = pick, onSearchCenter = { showCenterPicker = true }
-            ) { p -> AmapIntents.openNavigation(context, p.latitude, p.longitude, p.name) }
-
-            Spacer(Modifier.height(12.dp))
-
             OutlinedTextField(
-                value = kw, onValueChange = { kw = it },
+                value = kw,
+                onValueChange = { kw = it },
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(14.dp),
                 placeholder = {
-                    Text("搜地址、美食名或关键词（留空=搜全部）", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "附近美食",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
                 },
                 leadingIcon = {
-                    Icon(Icons.Filled.Search, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(18.dp))
+                    Icon(
+                        Icons.Filled.Search,
+                        contentDescription = null,
+                        tint = TextSecondary,
+                        modifier = Modifier.size(18.dp)
+                    )
                 },
                 trailingIcon = {
                     Box(
-                        modifier = Modifier.height(36.dp).background(MaterialTheme.colorScheme.primary, RoundedCornerShape(999.dp)).clickable(onClick = doSearch).padding(horizontal = 16.dp),
+                        modifier = Modifier
+                            .height(36.dp)
+                            .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(999.dp))
+                            .clickable(onClick = doSearch)
+                            .padding(horizontal = 16.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = if (searching) "搜索中" else "搜索",
-                            color = Color.White, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold
+                            text = if (searching) "搜索中…" else "搜索",
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold
                         )
                     }
                 },
-                singleLine = true, maxLines = 1,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, imeAction = ImeAction.Search),
+                singleLine = true,
+                maxLines = 1,
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Text,
+                    imeAction = ImeAction.Search
+                ),
                 keyboardActions = KeyboardActions(onSearch = { doSearch() }),
                 colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Brand500)
             )
 
             Spacer(Modifier.height(10.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(40.dp)
+                        .background(
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+                            RoundedCornerShape(12.dp)
+                        )
+                        .clickable { showRandomDialog = true }
+                        .padding(horizontal = 14.dp),
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "🎲 随机推荐",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Brand500,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Icon(
+                            Icons.Filled.Shuffle,
+                            contentDescription = null,
+                            tint = Brand500,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+                Box(
+                    modifier = Modifier
+                        .height(40.dp)
+                        .background(
+                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            RoundedCornerShape(12.dp)
+                        )
+                        .clickable { showCenterPicker = true }
+                        .padding(horizontal = 12.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Filled.LocationOn,
+                            contentDescription = null,
+                            tint = Brand500,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text = run {
+                                val c = center
+                                when {
+                                    c == null -> "选位置"
+                                    c.label == "我的定位" -> "${settings.searchRadiusKm}km"
+                                    else -> c.label
+                                }
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Brand500,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
 
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(FoodRepository.FOOD_CHIPS) { chip ->
@@ -342,14 +490,16 @@ fun FoodScreen(
                                     sel -> MaterialTheme.colorScheme.primary
                                     disabled -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                                     else -> MaterialTheme.colorScheme.surface
-                                }, RoundedCornerShape(999.dp)
+                                },
+                                RoundedCornerShape(999.dp)
                             )
                             .clickable(enabled = !disabled) { category = chip }
                             .padding(horizontal = 13.dp, vertical = 7.dp)
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = chip, style = MaterialTheme.typography.labelMedium,
+                                text = chip,
+                                style = MaterialTheme.typography.labelMedium,
                                 color = when {
                                     sel -> Color.White
                                     disabled -> TextSecondary.copy(alpha = 0.6f)
@@ -377,29 +527,40 @@ fun FoodScreen(
                     val sel = s == sort
                     Box(
                         modifier = Modifier
-                            .background(if (sel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface, RoundedCornerShape(999.dp))
+                            .background(
+                                if (sel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
+                                RoundedCornerShape(999.dp)
+                            )
                             .clickable { sort = s }
                             .padding(horizontal = 12.dp, vertical = 6.dp)
                     ) {
-                        Text(text = s, style = MaterialTheme.typography.labelSmall, color = if (sel) Color.White else MaterialTheme.colorScheme.onSurface)
+                        Text(
+                            text = s,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (sel) Color.White else MaterialTheme.colorScheme.onSurface
+                        )
                     }
                 }
             }
 
             Spacer(Modifier.height(12.dp))
 
-            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Text(
                     text = if (kw.isNotBlank() && hasSearched) "搜索结果" else "美食",
-                    style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
                     text = when {
-                        searching -> "搜索中"
+                        searching -> "搜索中…"
                         error != null -> friendlyError(error)
-                        displayed.isNotEmpty() -> "共 ${displayed.size} 家 本地缓存"
-                        !hasSearched -> if (amapKey.isNullOrBlank()) "先配置高德 Key，再点搜索" else "点击「搜索」抓取附近美食"
+                        displayed.isNotEmpty() -> "共 ${displayed.size} 家 · 本地缓存"
+                        !hasSearched -> if (amapKey.isNullOrBlank()) "先配置高德 Key，再点搜索" else "点「搜索」加载附近美食"
                         else -> "暂无结果，换关键词或调整范围"
                     },
                     style = MaterialTheme.typography.labelSmall,
@@ -417,10 +578,16 @@ fun FoodScreen(
                     displayed.forEach { poi ->
                         FoodPoiCard(
                             poi = poi,
-                            onFav = { scope.launch { runCatching { container.foodRepo.toggleFavorite(poi) } } },
-                            onMap = { AmapIntents.openNavigation(context, poi.latitude, poi.longitude, poi.name) },
+                            onFav = {
+                                scope.launch { runCatching { container.foodRepo.toggleFavorite(poi) } }
+                            },
+                            onMap = {
+                                AmapIntents.openNavigation(context, poi.latitude, poi.longitude, poi.name)
+                            },
                             onBlock = { blacklistTarget = poi },
-                            onAddressClick = { AmapIntents.openNavigation(context, poi.latitude, poi.longitude, poi.name) },
+                            onAddressClick = {
+                                AmapIntents.openNavigation(context, poi.latitude, poi.longitude, poi.name)
+                            },
                             onAddressLongPress = {
                                 if (poi.address.isNotBlank()) {
                                     clipboard.setText(AnnotatedString(poi.address))
@@ -433,26 +600,60 @@ fun FoodScreen(
             } else {
                 val hint = when {
                     error != null -> friendlyError(error)
-                    !hasSearched -> "点右上角「搜索」加载附近美食"
+                    !hasSearched -> "点「搜索」加载附近美食"
                     else -> "换个关键词或在设置里扩大搜索范围"
                 }
-                EmptyState(emoji = "X", title = if (amapKey.isNullOrBlank()) "尚未配置高德 Key" else "暂无美食", subtitle = hint)
+                EmptyState(
+                    emoji = "🍽️",
+                    title = if (amapKey.isNullOrBlank()) "尚未配置高德 Key" else "暂无美食",
+                    subtitle = hint
+                )
             }
 
             Spacer(Modifier.height(18.dp))
         }
     }
 
+    if (showRandomDialog) {
+        RandomRecommendDialog(
+            results = results.filter { !it.isBlacklisted },
+            onDismiss = { showRandomDialog = false },
+            onPick = { poi ->
+                showRandomDialog = false
+                AmapIntents.openNavigation(context, poi.latitude, poi.longitude, poi.name)
+            }
+        )
+    }
+
+    if (showFetchProgress) {
+        FetchProgressDialog(
+            progress = progress,
+            searching = searching,
+            onDismiss = { showFetchProgress = false }
+        )
+    }
+
     if (showCenterPicker) {
         SearchCenterDialog(
-            addresses = addresses, current = center, locating = pickingLocation, radiusKm = settings.searchRadiusKm,
+            addresses = addresses,
+            current = center,
+            locating = pickingLocation,
+            radiusKm = settings.searchRadiusKm,
             onDismiss = { showCenterPicker = false },
             onGps = { useGps(); showCenterPicker = false },
             onPickAddress = { a ->
-                center = a.toCenter(); showCenterPicker = false; toast("已切换到「${a.name}」")
+                center = a.toCenter()
+                showCenterPicker = false
+                toast("已切换到「${a.name}」")
             },
-            onManage = { showCenterPicker = false; nav(Routes.ADDRESS_MANAGE) },
-            onSettings = { showCenterPicker = false; nav(Routes.FOOD_SETTINGS) }
+            onManage = {
+                showCenterPicker = false
+                nav(Routes.ADDRESS_MANAGE)
+            },
+            onSettings = {
+                showCenterPicker = false
+                nav(Routes.FOOD_SETTINGS)
+            }
         )
     }
 
@@ -462,10 +663,15 @@ fun FoodScreen(
             Column(modifier = Modifier.padding(horizontal = 20.dp).padding(bottom = 32.dp)) {
                 Text(text = "美食设置", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(6.dp))
-                Text(text = "去 https://lbs.amap.com 申请 Web 服务 Key", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                Text(
+                    text = "去 https://lbs.amap.com 申请 Web 服务 Key（免费）",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary
+                )
                 Spacer(Modifier.height(14.dp))
                 OutlinedTextField(
-                    value = keyInput, onValueChange = { keyInput = it },
+                    value = keyInput,
+                    onValueChange = { keyInput = it },
                     modifier = Modifier.fillMaxWidth(),
                     label = { Text("高德 Web 服务 API Key") },
                     singleLine = true,
@@ -473,12 +679,16 @@ fun FoodScreen(
                 )
                 Spacer(Modifier.height(16.dp))
                 Box(
-                    modifier = Modifier.fillMaxWidth().height(48.dp).background(MaterialTheme.colorScheme.primary, RoundedCornerShape(999.dp)).clickable {
-                        container.securePrefs.setAmapKey(keyInput.trim().ifEmpty { null })
-                        amapKey = container.securePrefs.getAmapKey()
-                        showKeySheet = false
-                        toast(if (amapKey != null) "Key 已保存" else "已清空 Key")
-                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(999.dp))
+                        .clickable {
+                            container.securePrefs.setAmapKey(keyInput.trim().ifEmpty { null })
+                            amapKey = container.securePrefs.getAmapKey()
+                            showKeySheet = false
+                            toast(if (amapKey != null) "Key 已保存" else "已清空 Key")
+                        },
                     contentAlignment = Alignment.Center
                 ) {
                     Text(text = "保存 Key", color = Color.White, style = MaterialTheme.typography.labelLarge)
@@ -494,90 +704,203 @@ fun FoodScreen(
             text = { Text("「${poi.name}」将不再出现在搜索和随机推荐中。") },
             confirmButton = {
                 TextButton(onClick = {
-                    scope.launch { runCatching { container.foodRepo.setBlacklisted(poi, true) }
+                    scope.launch { runCatching { container.foodRepo.setBlacklisted(poi, true) } }
                     blacklistTarget = null
                 }) { Text("拉黑", color = Danger500) }
             },
-            dismissButton = { TextButton(onClick = { blacklistTarget = null }) { Text("取消") } }
+            dismissButton = {
+                TextButton(onClick = { blacklistTarget = null }) { Text("取消") }
+            }
         )
     }
 }
 
 @Composable
-private fun RandomHeroCard(
-    picked: FoodPoiEntity?,
-    picking: Boolean,
-    center: SearchCenter?,
-    radiusKm: Int,
-    onRandom: () -> Unit,
-    onSearchCenter: () -> Unit,
-    onGo: (FoodPoiEntity) -> Unit
+private fun RandomRecommendDialog(
+    results: List<FoodPoiEntity>,
+    onDismiss: () -> Unit,
+    onPick: (FoodPoiEntity) -> Unit
 ) {
-    SjCard(
-        modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.05f)
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(text = "Y 今天吃什么", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.width(8.dp))
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f), RoundedCornerShape(999.dp))
-                    .clickable { onSearchCenter() }
-                    .padding(horizontal = 10.dp, vertical = 5.dp),
-                contentAlignment = Alignment.CenterStart
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.LocationOn, contentDescription = null, tint = Brand500, modifier = Modifier.size(13.dp))
-                    Spacer(Modifier.width(4.dp))
+    var selectedCategory by remember { mutableStateOf<String?>(null) }
+    var randomPicked by remember { mutableStateOf<FoodPoiEntity?>(null) }
+
+    val filtered = remember(selectedCategory, results) {
+        if (selectedCategory == null) {
+            results.filter { poi ->
+                val t = poi.type + poi.name
+                !(t.contains("奶茶") || t.contains("甜品") || t.contains("咖啡") ||
+                    t.contains("饮品") || t.contains("蛋糕") || t.contains("面包") ||
+                    t.contains("冰淇淋") || t.contains("茶艺") || t.contains("果饮"))
+            }
+        } else {
+            val keyword = RANDOM_CATEGORY_MAP[selectedCategory] ?: selectedCategory!!
+            results.filter { it.type.contains(keyword) || it.name.contains(keyword) }
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = "🎲 随机推荐",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+        },
+        text = {
+            Column {
+                if (randomPicked != null) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Brand500.copy(alpha = 0.08f), RoundedCornerShape(12.dp))
+                            .padding(14.dp)
+                    ) {
+                        Text(
+                            text = randomPicked!!.name,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            "${randomPicked!!.type} · ${FormatUtils.distance(randomPicked!!.distance)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Box(
+                                modifier = Modifier
+                                    .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp))
+                                    .clickable {
+                                        val list = if (selectedCategory == null) {
+                                            results.filter { poi ->
+                                                val t = poi.type + poi.name
+                                                !(t.contains("奶茶") || t.contains("甜品") || t.contains("咖啡") ||
+                                                    t.contains("饮品") || t.contains("蛋糕") || t.contains("面包") ||
+                                                    t.contains("冰淇淋") || t.contains("茶艺") || t.contains("果饮"))
+                                            }
+                                        } else {
+                                            val keyword = RANDOM_CATEGORY_MAP[selectedCategory!!] ?: selectedCategory!!
+                                            results.filter { it.type.contains(keyword) || it.name.contains(keyword) }
+                                        }
+                                        randomPicked = list.randomOrNull()
+                                    }
+                                    .padding(horizontal = 14.dp, vertical = 7.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("再抽一个", color = Color.White, style = MaterialTheme.typography.labelSmall)
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .background(Brand500.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
+                                    .clickable { onPick(randomPicked!!) }
+                                    .padding(horizontal = 14.dp, vertical = 7.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("去这里", color = Brand500, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(14.dp))
+                }
+
+                Text(
+                    text = "选个类型，随机抽一家：",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary
+                )
+                Spacer(Modifier.height(10.dp))
+
+                RANDOM_CATEGORIES.forEach { cat ->
+                    val keyword = RANDOM_CATEGORY_MAP[cat] ?: cat
+                    val count = results.count { it.type.contains(keyword) || it.name.contains(keyword) }
+                    val sel = selectedCategory == cat
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                if (sel) Brand500.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                                RoundedCornerShape(10.dp)
+                            )
+                            .clickable {
+                                selectedCategory = cat
+                                val keyword2 = RANDOM_CATEGORY_MAP[cat] ?: cat
+                                val list = results.filter { it.type.contains(keyword2) || it.name.contains(keyword2) }
+                                randomPicked = list.randomOrNull()
+                            }
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = cat,
+                            style = MaterialTheme.typography.bodyLarge,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            text = "${count}家",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (sel) Brand500 else TextSecondary
+                        )
+                        if (sel) {
+                            Spacer(Modifier.width(6.dp))
+                            Icon(
+                                Icons.Filled.CheckCircle,
+                                contentDescription = null,
+                                tint = Brand500,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(6.dp))
+                }
+
+                if (results.isEmpty()) {
+                    Spacer(Modifier.height(8.dp))
                     Text(
-                        text = when {
-                            center == null -> "选择搜索中心"
-                            center.label == "我的定位" -> "当前定位 A ${radiusKm}km"
-                            else -> "${center.label} A ${radiusKm}km"
-                        },
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Brand500,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        text = "还没有缓存美食，先点「搜索」获取附近美食吧",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondary
                     )
                 }
             }
-            Spacer(Modifier.width(8.dp))
-            Box(
-                modifier = Modifier.size(36.dp).background(MaterialTheme.colorScheme.primary, CircleShape).clickable { onRandom() },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(Icons.Filled.Shuffle, contentDescription = "a", tint = Color.White, modifier = Modifier.size(18.dp))
-            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("关闭") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
         }
+    )
+}
 
-        if (picking) {
-            Spacer(Modifier.height(10.dp))
-            Text("挑选中", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
-        } else if (picked != null) {
-            Spacer(Modifier.height(10.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface, RoundedCornerShape(12.dp)).padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(picked.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Spacer(Modifier.height(2.dp))
-                    Text("${picked.type} A ${FormatUtils.distance(picked.distance)} A ${FormatUtils.cost(picked.cost)}", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
-                }
-                Box(
-                    modifier = Modifier.background(Brand500, RoundedCornerShape(10.dp)).clickable { onGo(picked) }.padding(horizontal = 12.dp, vertical = 7.dp)
-                ) {
-                    Text("a", color = Color.White, style = MaterialTheme.typography.labelSmall)
-                }
+@Composable
+private fun FetchProgressDialog(
+    progress: Pair<Int, Int>,
+    searching: Boolean,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("正在获取附近美食…") },
+        text = {
+            Column {
+                LinearProgressIndicator(
+                    progress = { if (searching) (progress.first.toFloat() / (progress.second.coerceAtLeast(1)).toFloat()).coerceIn(0f, 1f) else 1f },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    text = if (searching) "第 ${progress.first} 页" else "获取完成",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary
+                )
             }
-        } else {
-            Spacer(Modifier.height(10.dp))
-            Text("还没结果？点「搜索」先加载附近美食，之后再随机", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(if (searching) "后台获取" else "完成") }
         }
-    }
+    )
 }
 
 @Composable
@@ -592,9 +915,13 @@ private fun FoodPoiCard(
     SjCard(modifier = Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.Top) {
             Box(
-                modifier = Modifier.size(40.dp).background(Brand500.copy(alpha = 0.12f), RoundedCornerShape(10.dp)),
+                modifier = Modifier
+                    .size(40.dp)
+                    .background(Brand500.copy(alpha = 0.12f), RoundedCornerShape(10.dp)),
                 contentAlignment = Alignment.Center
-            ) { Text(foodEmoji(poi.type), fontSize = 20.sp) }
+            ) {
+                Text(foodEmoji(poi.type), fontSize = 20.sp)
+            }
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -608,11 +935,15 @@ private fun FoodPoiCard(
                     )
                     poi.rating?.let {
                         Spacer(Modifier.width(6.dp))
-                        Text("= ${FormatUtils.rating(it)}", style = MaterialTheme.typography.labelSmall, color = Orange500)
+                        Text("⭐ ${FormatUtils.rating(it)}", style = MaterialTheme.typography.labelSmall, color = Orange500)
                     }
                 }
                 Spacer(Modifier.height(2.dp))
-                Text("${poi.type} A ${FormatUtils.distance(poi.distance)} A ${FormatUtils.cost(poi.cost)}", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                Text(
+                    "${poi.type} · ${FormatUtils.distance(poi.distance)} · ${FormatUtils.cost(poi.cost)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary
+                )
             }
         }
 
@@ -650,15 +981,19 @@ private fun FoodPoiCard(
                         modifier = Modifier.size(15.dp)
                     )
                 },
-                text = "a", tint = if (poi.isFavorite) Danger500 else null, onClick = onFav
+                text = "收藏", tint = if (poi.isFavorite) Danger500 else null, onClick = onFav
             )
             ActionPill(
-                icon = { Icon(Icons.Filled.Map, contentDescription = null, tint = Brand500, modifier = Modifier.size(15.dp)) },
-                text = "b", tint = Brand500, onClick = onMap
+                icon = {
+                    Icon(Icons.Filled.Map, contentDescription = null, tint = Brand500, modifier = Modifier.size(15.dp))
+                },
+                text = "导航", tint = Brand500, onClick = onMap
             )
             ActionPill(
-                icon = { Icon(Icons.Filled.Block, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(15.dp)) },
-                text = "c", tint = TextSecondary, onClick = onBlock
+                icon = {
+                    Icon(Icons.Filled.Block, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(15.dp))
+                },
+                text = "拉黑", tint = TextSecondary, onClick = onBlock
             )
         }
     }
@@ -708,7 +1043,7 @@ private fun SearchCenterDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("搜索中心 A ${radiusKm}km") },
+        title = { Text("搜索中心 · ${radiusKm}km") },
         text = {
             Column {
                 Row(
@@ -722,13 +1057,13 @@ private fun SearchCenterDialog(
                     Icon(Icons.Filled.LocationOn, contentDescription = null, tint = Brand500, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        text = if (locating) "正在定位" else "当前定位",
+                        text = if (locating) "正在定位…" else "当前定位",
                         style = MaterialTheme.typography.bodyLarge,
                         color = Brand500
                     )
                     if (current?.label == "我的定位") {
                         Spacer(Modifier.weight(1f))
-                        Text("a", color = Brand500, style = MaterialTheme.typography.labelMedium)
+                        Text("✓", color = Brand500, style = MaterialTheme.typography.labelMedium)
                     }
                 }
                 Spacer(Modifier.height(8.dp))
@@ -740,35 +1075,48 @@ private fun SearchCenterDialog(
                             .padding(vertical = 10.dp, horizontal = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(text = "A", fontSize = 14.sp)
+                        Text(text = "📍", fontSize = 14.sp)
                         Spacer(Modifier.width(8.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = a.name + if (a.isDefault) "B" else "",
+                                text = a.name + if (a.isDefault) "（默认）" else "",
                                 style = MaterialTheme.typography.bodyLarge,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
                             if (a.address.isNotBlank()) {
-                                Text(a.address, style = MaterialTheme.typography.bodySmall, color = TextSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(
+                                    a.address,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextSecondary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                             }
                         }
                         if (current?.label == a.name) {
-                            Text("a", color = Brand500, style = MaterialTheme.typography.labelMedium)
+                            Text("✓", color = Brand500, style = MaterialTheme.typography.labelMedium)
                         }
                     }
                 }
                 Spacer(Modifier.height(6.dp))
                 Box(
-                    modifier = Modifier.fillMaxWidth().clickable { onSettings() }.padding(vertical = 10.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onSettings() }
+                        .padding(vertical = 10.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("调整搜索范围（1A10km）", color = Brand500, style = MaterialTheme.typography.labelMedium)
+                    Text("调整搜索范围（1–10km）", color = Brand500, style = MaterialTheme.typography.labelMedium)
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onManage) { Text("管理地址") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("关闭") } }
+        confirmButton = {
+            TextButton(onClick = onManage) { Text("管理地址") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("关闭") }
+        }
     )
 }
 
@@ -776,16 +1124,16 @@ private fun SearchAddressEntity.toCenter(): SearchCenter =
     SearchCenter(label = name, lat = latitude, lng = longitude, address = address)
 
 private fun foodEmoji(type: String): String = when {
-    type.contains("火锅") -> "C"
-    type.contains("烧烤") || type.contains("烤肉") -> "D"
-    type.contains("面") || type.contains("粉") || type.contains("馄饨") || type.contains("饺子") || type.contains("包子") -> "E"
-    type.contains("甜品") || type.contains("蛋糕") || type.contains("面包") || type.contains("烘焙") || type.contains("冰淇淋") -> "F"
-    type.contains("奶茶") || type.contains("咖啡") || type.contains("饮品") -> "G"
-    type.contains("快餐") || type.contains("汉堡") || type.contains("披萨") -> "H"
-    type.contains("日") || type.contains("寿司") || type.contains("韩") -> "I"
-    type.contains("西餐") -> "J"
-    type.contains("小吃") || type.contains("粤") -> "K"
-    type.contains("海鲜") || type.contains("水产") -> "L"
-    type.contains("水果") || type.contains("鲜果") -> "M"
-    else -> "N"
+    type.contains("火锅") -> "🍲"
+    type.contains("烧烤") || type.contains("烤肉") -> "🍢"
+    type.contains("面") || type.contains("粉") || type.contains("馄饨") || type.contains("饺子") || type.contains("包子") -> "🍜"
+    type.contains("甜品") || type.contains("蛋糕") || type.contains("面包") || type.contains("烘焙") || type.contains("冰淇淋") -> "🍰"
+    type.contains("奶茶") || type.contains("咖啡") || type.contains("饮品") -> "🧋"
+    type.contains("快餐") || type.contains("汉堡") || type.contains("披萨") -> "🍔"
+    type.contains("日") || type.contains("寿司") || type.contains("韩") -> "🍣"
+    type.contains("西餐") -> "🍕"
+    type.contains("小吃") || type.contains("粤") -> "🥟"
+    type.contains("海鲜") || type.contains("水产") -> "🦐"
+    type.contains("水果") || type.contains("鲜果") -> "🍉"
+    else -> "🍽️"
 }

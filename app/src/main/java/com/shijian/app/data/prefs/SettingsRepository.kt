@@ -94,6 +94,37 @@ class SettingsRepository(context: Context) {
 
     fun setMultiPointSearch(enabled: Boolean) = update { putBoolean("multi_point_search", enabled) }
 
+    /** 最后搜索位置（用于判断是否需要刷新缓存） */
+    fun getLastSearchLatLng(): Pair<Double, Double>? {
+        val lat = prefs.getFloat("last_search_lat", Float.NaN).toDouble()
+        val lng = prefs.getFloat("last_search_lng", Float.NaN).toDouble()
+        return if (lat.isNaN() || lng.isNaN()) null else lat to lng
+    }
+
+    fun setLastSearchLatLng(lat: Double, lng: Double) {
+        prefs.edit().apply {
+            putFloat("last_search_lat", lat.toFloat())
+            putFloat("last_search_lng", lng.toFloat())
+        }.apply()
+    }
+
+    fun isLocationChanged(lat: Double, lng: Double, thresholdMeters: Double = 20.0): Boolean {
+        val last = getLastSearchLatLng() ?: return true
+        val dist = haversine(last.first, last.second, lat, lng)
+        return dist > thresholdMeters
+    }
+
+    private fun haversine(lat1: Double, lng1: Double, lat2: Double, lng2: Double): Double {
+        val R = 6371000.0
+        val dLat = Math.toRadians(lat2 - lat1)
+        val dLng = Math.toRadians(lng2 - lng1)
+        val a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) *
+                Math.sin(dLng / 2) * Math.sin(dLng / 2)
+        val c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+        return R * c
+    }
+
     /** 已看到过的版本号（更新公告用） */
     fun lastSeenVersion(): String? = prefs.getString("last_seen_version", null)
 

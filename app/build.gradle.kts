@@ -13,8 +13,8 @@ android {
         applicationId = "com.shijian.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 110
-        versionName = "1.1.0"
+        versionCode = 113
+        versionName = "1.1.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

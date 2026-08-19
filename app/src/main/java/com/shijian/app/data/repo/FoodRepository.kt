@@ -12,7 +12,6 @@ import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.withContext
 import kotlin.math.cos
 
-/** 美食仓库：本地缓存 + 高德多点位搜索；所有挂起方法保证不抛异常（失败写入 _error） */
 class FoodRepository(private val dao: FoodPoiDao) {
 
     private val _results = MutableStateFlow<List<FoodPoiEntity>>(emptyList())
@@ -23,6 +22,9 @@ class FoodRepository(private val dao: FoodPoiDao) {
 
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error
+
+    private val _progress = MutableStateFlow(0 to 0)
+    val progress: StateFlow<Pair<Int, Int>> = _progress
 
     fun observeActive(): Flow<List<FoodPoiEntity>> = dao.observeActive()
     fun observeFavorites(): Flow<List<FoodPoiEntity>> = dao.observeFavorites()
@@ -43,12 +45,12 @@ class FoodRepository(private val dao: FoodPoiDao) {
         _results.value = emptyList()
     }
 
-    /** 随机推荐：优先收藏，其次未拉黑缓存；任何异常不向上抛（返回 null） */
     suspend fun randomPick(): FoodPoiEntity? = withContext(Dispatchers.IO) {
         runCatching { dao.randomFavorite() ?: dao.randomActive() }.getOrNull()
     }
 
-    /** 周边搜索。pagesPerPoint：每个点位最多翻几页；multiPoint=true 时会按半径拆多个子点。 */
+    /** 周边搜索（带缓存，优先全量缓存本地筛选，再查分键缓存，最后才调 API）
+     *  搜索 API 调用时采用自动翻页直到无结果或触发 QPS 限制 */
     suspend fun searchAround(
         amapKey: String,
         lat: Double,
@@ -57,82 +59,84 @@ class FoodRepository(private val dao: FoodPoiDao) {
         keywords: String?,
         foodType: String?,
         multiPoint: Boolean,
-        pagesPerPoint: Int = 2
+        pagesPerPoint: Int = Int.MAX_VALUE
     ): Boolean = withContext(Dispatchers.IO) {
         _searching.value = true
         _error.value = null
         try {
-            val centerKey = "${lng},${lat}|${radiusKm}|${keywords ?: ""}|${foodType ?: ""}"
             val freshBefore = System.currentTimeMillis() - CACHE_TTL
-            val cachedCount = runCatching { dao.cachedCount(centerKey, freshBefore) }.getOrDefault(0)
+
+            val baseKey = "${lng},${lat}|${radiusKm}||"
+            val specificKey = "${lng},${lat}|${radiusKm}|${keywords ?: ""}|${foodType ?: ""}"
+
+            val fullCacheCount = runCatching { dao.cachedCount(baseKey, freshBefore) }.getOrDefault(0)
+            if (fullCacheCount > 0) {
+                val kw = keywords?.takeIf { it.isNotBlank() }
+                val filtered = dao.searchLocalByCenter(baseKey, freshBefore, kw, foodType)
+                _results.value = filtered
+                return@withContext false
+            }
+
+            val cachedCount = runCatching { dao.cachedCount(specificKey, freshBefore) }.getOrDefault(0)
             if (cachedCount > 0) {
-                val cached = dao.observeCached(centerKey, freshBefore).firstOrNull()
+                val cached = dao.observeCached(specificKey, freshBefore).firstOrNull()
                 if (!cached.isNullOrEmpty()) {
                     _results.value = cached.filter { p -> !p.isBlacklisted }
                     return@withContext false
                 }
             }
+            doFetchAround(amapKey, lat, lng, radiusKm, keywords, foodType, multiPoint, pagesPerPoint, specificKey)
+        } catch (e: Exception) {
+            _error.value = "搜索失败：${e.message ?: "网络或 Key 异常"}"
+            false
+        } finally {
+            _searching.value = false
+        }
+    }
 
-            val types = FOOD_TYPES[foodType] ?: FOOD_TYPES["全部"] ?: "050000"
+    /** 全量获取周边美食（自动翻页直到无更多结果，或触发 QPS 限制） */
+    suspend fun fetchAllAround(
+        amapKey: String,
+        lat: Double,
+        lng: Double,
+        radiusKm: Int,
+        onProgress: (Int, Int) -> Unit = { _, _ -> }
+    ): Boolean = withContext(Dispatchers.IO) {
+        _searching.value = true
+        _error.value = null
+        _progress.value = 0 to 0
+        try {
+            val centerKey = "${lng},${lat}|${radiusKm}||"
+            val types = FOOD_TYPES["全部"] ?: "050000"
             val raw = mutableListOf<AmapPoi>()
             val seen = HashSet<String>()
-            val pagesLimit = pagesPerPoint.coerceAtLeast(1)
+            var page = 1
+            var totalPages = 0
             var hitQpsLimit = false
 
-            if (multiPoint) {
-                val n = when {
-                    radiusKm <= 2 -> 2
-                    radiusKm <= 5 -> 3
-                    else -> 4
+            while (true) {
+                val resp = ApiClient.amap.around(
+                    key = amapKey,
+                    location = "$lng,$lat",
+                    radius = radiusKm * 1000,
+                    keywords = null,
+                    types = types,
+                    offset = 25,
+                    page = page
+                )
+                if (resp.status != "1") {
+                    val info = resp.info.ifBlank { "高德返回错误：${resp.status}" }
+                    _error.value = info
+                    if (info.contains("CUQPS", ignoreCase = true) ||
+                        info.contains("DAILY_QUERY", ignoreCase = true)) hitQpsLimit = true
+                    break
                 }
-                val points = runCatching { samplePoints(lat, lng, radiusKm, n) }.getOrDefault(listOf(lat to lng))
-                var calls = 0
-                val maxCalls = (n * pagesLimit).coerceAtMost(18)
-                pointsLoop@
-                for ((plat, plng) in points) {
-                    var page = 1
-                    while (page <= pagesLimit && calls < maxCalls) {
-                        val resp = ApiClient.amap.around(
-                            key = amapKey,
-                            location = "$plng,$plat",
-                            radius = radiusKm * 1000,
-                            keywords = keywords,
-                            types = types,
-                            page = page
-                        )
-                        calls++
-                        if (resp.status != "1") {
-                            val info = resp.info.ifBlank { "高德返回错误：${resp.status}" }
-                            _error.value = info
-                            if (info.contains("CUQPS", ignoreCase = true)) hitQpsLimit = true
-                            break@pointsLoop
-                        }
-                        if (resp.pois.isEmpty()) break
-                        resp.pois.forEach { p -> if (seen.add(p.id)) raw.add(p) }
-                        page++
-                    }
-                }
-            } else {
-                var page = 1
-                while (page <= pagesLimit) {
-                    val resp = ApiClient.amap.around(
-                        key = amapKey,
-                        location = "$lng,$lat",
-                        radius = radiusKm * 1000,
-                        keywords = keywords,
-                        types = types,
-                        page = page
-                    )
-                    if (resp.status != "1") {
-                        val info = resp.info.ifBlank { "高德返回错误：${resp.status}" }
-                        _error.value = info
-                        if (info.contains("CUQPS", ignoreCase = true)) hitQpsLimit = true
-                        break
-                    }
-                    if (resp.pois.isEmpty()) break
-                    resp.pois.forEach { p -> if (seen.add(p.id)) raw.add(p) }
-                    page++
-                }
+                if (resp.pois.isEmpty()) break
+                resp.pois.forEach { p -> if (seen.add(p.id)) raw.add(p) }
+                totalPages = page
+                _progress.value = page to -1
+                onProgress(page, totalPages)
+                page++
             }
 
             val now = System.currentTimeMillis()
@@ -144,16 +148,102 @@ class FoodRepository(private val dao: FoodPoiDao) {
             if (hitQpsLimit && entities.isNotEmpty()) {
                 _error.value = null
             }
-            entities.isNotEmpty() || !hitQpsLimit
+            true
         } catch (e: Exception) {
-            _error.value = "搜索失败：${e.message ?: "网络或 Key 异常"}"
+            _error.value = "获取失败：${e.message ?: "网络或 Key 异常"}"
             false
         } finally {
             _searching.value = false
         }
     }
 
-    suspend fun searchByKeyword(amapKey: String, keyword: String, city: String?, pages: Int = 1) {
+    private suspend fun doFetchAround(
+        amapKey: String,
+        lat: Double,
+        lng: Double,
+        radiusKm: Int,
+        keywords: String?,
+        foodType: String?,
+        multiPoint: Boolean,
+        pagesPerPoint: Int,
+        centerKey: String
+    ): Boolean {
+        val types = FOOD_TYPES[foodType] ?: FOOD_TYPES["全部"] ?: "050000"
+        val raw = mutableListOf<AmapPoi>()
+        val seen = HashSet<String>()
+        var hitQpsLimit = false
+
+        if (multiPoint) {
+            val n = when {
+                radiusKm <= 2 -> 2
+                radiusKm <= 5 -> 3
+                else -> 4
+            }
+            val points = runCatching { samplePoints(lat, lng, radiusKm, n) }.getOrDefault(listOf(lat to lng))
+            var calls = 0
+            val maxCalls = (n * 10).coerceAtMost(50)
+            pointsLoop@
+            for ((plat, plng) in points) {
+                var page = 1
+                while (calls < maxCalls) {
+                    val resp = ApiClient.amap.around(
+                        key = amapKey,
+                        location = "$plng,$plat",
+                        radius = radiusKm * 1000,
+                        keywords = keywords,
+                        types = types,
+                        offset = 25,
+                        page = page
+                    )
+                    calls++
+                    if (resp.status != "1") {
+                        val info = resp.info.ifBlank { "高德返回错误：${resp.status}" }
+                        _error.value = info
+                        if (info.contains("CUQPS", ignoreCase = true)) hitQpsLimit = true
+                        break@pointsLoop
+                    }
+                    if (resp.pois.isEmpty()) break
+                    resp.pois.forEach { p -> if (seen.add(p.id)) raw.add(p) }
+                    page++
+                }
+            }
+        } else {
+            var page = 1
+            while (true) {
+                val resp = ApiClient.amap.around(
+                    key = amapKey,
+                    location = "$lng,$lat",
+                    radius = radiusKm * 1000,
+                    keywords = keywords,
+                    types = types,
+                    offset = 25,
+                    page = page
+                )
+                if (resp.status != "1") {
+                    val info = resp.info.ifBlank { "高德返回错误：${resp.status}" }
+                    _error.value = info
+                    if (info.contains("CUQPS", ignoreCase = true)) hitQpsLimit = true
+                    break
+                }
+                if (resp.pois.isEmpty()) break
+                resp.pois.forEach { p -> if (seen.add(p.id)) raw.add(p) }
+                page++
+            }
+        }
+
+        val now = System.currentTimeMillis()
+        val entities = raw.mapNotNull { it.toEntityOrNull(centerKey, now) }
+        if (entities.isNotEmpty()) {
+            runCatching { dao.upsertAll(entities) }
+        }
+        _results.value = entities.filter { !it.isBlacklisted }
+        if (hitQpsLimit && entities.isNotEmpty()) {
+            _error.value = null
+        }
+        return entities.isNotEmpty() || !hitQpsLimit
+    }
+
+    suspend fun searchByKeyword(amapKey: String, keyword: String, city: String?) {
         withContext(Dispatchers.IO) {
             _searching.value = true
             _error.value = null
@@ -171,10 +261,9 @@ class FoodRepository(private val dao: FoodPoiDao) {
                 val raw = mutableListOf<AmapPoi>()
                 val seen = HashSet<String>()
                 var page = 1
-                val pagesLimit = pages.coerceAtLeast(1)
                 var hitQps = false
-                while (page <= pagesLimit) {
-                    val resp = ApiClient.amap.text(amapKey, keyword, city, page = page)
+                while (true) {
+                    val resp = ApiClient.amap.text(amapKey, keyword, city, offset = 25, page = page)
                     if (resp.status != "1") {
                         val info = resp.info.ifBlank { "高德返回错误：${resp.status}" }
                         _error.value = info
@@ -239,7 +328,6 @@ class FoodRepository(private val dao: FoodPoiDao) {
         return points
     }
 
-    /** toEntity 容错版：任何字段为空/格式错误均返回 null，不丢入结果集。 */
     private fun AmapPoi.toEntityOrNull(centerKey: String, now: Long): FoodPoiEntity? = runCatching {
         if (id.isBlank() && name.isBlank()) return@runCatching null
         val parts = location.split(",")
@@ -265,9 +353,7 @@ class FoodRepository(private val dao: FoodPoiDao) {
     }.getOrNull()
 
     companion object {
-        private const val CACHE_TTL = 30L * 24 * 3600 * 1000 // 30 天
-        private const val MAX_PAGES_PER_POINT = 8
-        private const val MAX_TOTAL_CALLS = 120
+        private const val CACHE_TTL = 30L * 24 * 3600 * 1000
 
         val FOOD_TYPES = mapOf(
             "全部" to "050000",

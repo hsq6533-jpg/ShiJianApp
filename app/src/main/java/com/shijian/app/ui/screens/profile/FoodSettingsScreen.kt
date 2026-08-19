@@ -15,6 +15,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -65,6 +66,7 @@ fun FoodSettingsScreen(
 
     var amapKey by remember { mutableStateOf("") }
     var showClear by remember { mutableStateOf(false) }
+    var showFetchDialog by remember { mutableStateOf(false) }
 
     val toast: (String) -> Unit = { msg -> Toast.makeText(context, msg, Toast.LENGTH_SHORT).show() }
     val keyConfigured = remember { container.securePrefs.getAmapKey() != null }
@@ -84,7 +86,7 @@ fun FoodSettingsScreen(
             GroupTitle("高德 Key")
             SjCard(modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    text = if (keyConfigured) "已配置 用于搜索附近美食，仅保存在本机" else "未配置 用于搜索附近美食，仅保存在本机",
+                    text = if (keyConfigured) "✓ 已配置 · 用于搜索附近美食，仅保存在本机" else "未配置 · 用于搜索附近美食，仅保存在本机",
                     style = MaterialTheme.typography.bodySmall,
                     color = if (keyConfigured) Brand500 else TextSecondary
                 )
@@ -125,13 +127,17 @@ fun FoodSettingsScreen(
                 Spacer(Modifier.height(12.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = settings.searchRadiusKm.toString(),
+                        text = "${settings.searchRadiusKm}",
                         color = Brand500,
                         fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.titleLarge
+                        style = MaterialTheme.typography.titleLarge.copy(fontFeatureSettings = "tnum")
                     )
                     Spacer(Modifier.height(4.dp))
-                    Text(" 公里", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                    Text(
+                        text = " 公里",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondary
+                    )
                 }
                 Slider(
                     value = settings.searchRadiusKm.toFloat(),
@@ -147,11 +153,25 @@ fun FoodSettingsScreen(
                     Text("5 km", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
                     Text("10 km", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
                 }
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    text = "距离中心点，按设置内搜索范围检索",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = TextSecondary
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            GroupTitle("数据管理")
+            SjCard(modifier = Modifier.fillMaxWidth()) {
+                ListRow(
+                    icon = "🍽️",
+                    label = "手动获取周围美食店铺",
+                    value = "获取所有附近美食",
+                    onClick = { showFetchDialog = true },
+                    iconBackground = Brand100
+                )
+                ListRow(
+                    icon = "🗺️",
+                    label = "地址管理",
+                    value = "常用地址",
+                    onClick = { nav(Routes.ADDRESS_MANAGE) },
+                    iconBackground = MaterialTheme.colorScheme.surfaceVariant
                 )
             }
 
@@ -162,17 +182,10 @@ fun FoodSettingsScreen(
                 SwitchRow(
                     icon = "📍",
                     label = "多点位搜索",
-                    subtitle = "覆盖更大区域，结果更全",
+                    subtitle = "覆盖更大区域，结果更全（推荐开启）",
                     checked = settings.multiPointSearch,
                     onCheckedChange = { container.settingsRepo.setMultiPointSearch(it) },
                     iconBackground = Brand100
-                )
-                ListRow(
-                    icon = "",
-                    label = "地址管理",
-                    value = "常用地址",
-                    onClick = { nav(Routes.ADDRESS_MANAGE) },
-                    iconBackground = MaterialTheme.colorScheme.surfaceVariant
                 )
             }
 
@@ -185,11 +198,11 @@ fun FoodSettingsScreen(
                     .clickable { showClear = true },
                 contentAlignment = Alignment.Center
             ) {
-                Text(" 清除美食缓存", style = MaterialTheme.typography.labelLarge, color = Danger500)
+                Text("🗑 清除美食缓存", style = MaterialTheme.typography.labelLarge, color = Danger500)
             }
             Spacer(Modifier.height(24.dp))
             Text(
-                text = "时笺手机版 纯本地运行",
+                text = "时笺手机版 · 纯本地运行",
                 style = MaterialTheme.typography.bodySmall,
                 color = TextSecondary,
                 modifier = Modifier.fillMaxWidth(),
@@ -203,13 +216,14 @@ fun FoodSettingsScreen(
         AlertDialog(
             onDismissRequest = { showClear = false },
             title = { Text("清除美食缓存？") },
-            text = { Text("将删除本地缓存的搜索记录，下次搜索需重新请求。") },
+            text = { Text("将删除本地缓存的搜索记录（保留收藏与拉黑标记），下次搜索需重新请求。") },
             confirmButton = {
                 TextButton(onClick = {
                     showClear = false
                     scope.launch {
-                        runCatching { container.foodRepo.clearCache() }
-                            .onSuccess { toast("美食缓存已清除") }
+                        runCatching {
+                            container.foodRepo.clearCache()
+                        }.onSuccess { toast("美食缓存已清除") }
                             .onFailure { toast("清除失败，请重试") }
                     }
                 }) { Text("清除", color = Danger500) }
@@ -219,6 +233,143 @@ fun FoodSettingsScreen(
             }
         )
     }
+
+    if (showFetchDialog) {
+        ManualFetchDialog(
+            container = container,
+            onDismiss = { showFetchDialog = false },
+            onComplete = { count ->
+                toast("获取完成，共 ${count} 家店铺")
+                showFetchDialog = false
+            }
+        )
+    }
+}
+
+@Composable
+private fun ManualFetchDialog(
+    container: AppContainer,
+    onDismiss: () -> Unit,
+    onComplete: (Int) -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val key = container.securePrefs.getAmapKey()
+    var fetching by remember { mutableStateOf(false) }
+    var pageCount by remember { mutableStateOf(0) }
+    var errorMsg by remember { mutableStateOf("") }
+
+    val settings by remember {
+        container.settingsRepo.settings
+            .catch { emit(AppSettings()) }
+    }.collectAsStateWithLifecycle(initialValue = AppSettings())
+
+    var lat by remember { mutableStateOf(0.0) }
+    var lng by remember { mutableStateOf(0.0) }
+
+    AlertDialog(
+        onDismissRequest = { if (!fetching) onDismiss() },
+        title = { Text("手动获取周围美食店铺") },
+        text = {
+            Column {
+                Text(
+                    text = "将获取当前位置范围内所有美食店铺，缓存到本地供离线使用。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary
+                )
+                Spacer(Modifier.height(12.dp))
+
+                if (fetching) {
+                    LinearProgressIndicator(
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = "正在获取… 第 ${pageCount} 页",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                } else if (errorMsg.isNotBlank()) {
+                    Text(
+                        text = errorMsg,
+                        color = Danger500,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                } else {
+                    Text(
+                        text = "搜索范围：${settings.searchRadiusKm} 公里",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondary
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = "点击「开始获取」将自动定位并抓取所有美食店铺。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondary
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    if (key.isNullOrBlank()) {
+                        errorMsg = "请先配置高德 Key"
+                        return@TextButton
+                    }
+                    fetching = true
+                    pageCount = 0
+                    errorMsg = ""
+                    scope.launch {
+                        val loc = runCatching {
+                            val lm = android.location.LocationManager::class.java
+                            val locationManager = context.getSystemService(android.content.Context.LOCATION_SERVICE) as android.location.LocationManager
+                            val providers = locationManager.getProviders(true)
+                            for (provider in providers) {
+                                try {
+                                    val lastLoc = locationManager.getLastKnownLocation(provider)
+                                    if (lastLoc != null) {
+                                        lat = lastLoc.latitude
+                                        lng = lastLoc.longitude
+                                        break
+                                    }
+                                } catch (_: SecurityException) {}
+                            }
+                            if (lat == 0.0) {
+                                val fallback = com.shijian.app.util.LocationUtils.getCurrentLocation(context)
+                                if (fallback != null) {
+                                    lat = fallback.latitude
+                                    lng = fallback.longitude
+                                }
+                            }
+                            lat to lng
+                        }.getOrNull()
+
+                        if (lat == 0.0) {
+                            errorMsg = "无法获取当前位置，请确保已开启定位"
+                            fetching = false
+                            return@launch
+                        }
+
+                        val result = container.foodRepo.fetchAllAround(key, lat, lng, settings.searchRadiusKm) { page, _ ->
+                            pageCount = page
+                        }
+                        container.settingsRepo.setLastSearchLatLng(lat, lng)
+                        val count = container.foodRepo.results.value.size
+                        fetching = false
+                        if (result) {
+                            onComplete(count)
+                        } else {
+                            errorMsg = "获取失败，请检查 Key 或网络"
+                        }
+                    }
+                },
+                enabled = !fetching
+            ) { Text(if (fetching) "获取中…" else "开始获取") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !fetching) { Text("取消") }
+        }
+    )
 }
 
 @Composable
